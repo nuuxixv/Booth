@@ -42,10 +42,13 @@ export const getSocieties = async () => {
 // L2 학회 상세에서 쓰는 events 단건 컬럼 집합.
 // 목록(EventManagementPage)이 fetch하는 운영 필드 + 신규(진행상태 3 boolean·prep_note).
 // anon 비노출 컬럼이 포함되므로 authenticated 컨텍스트(어드민)에서만 호출.
+// 2026-10-12 학회 개선 트랙 2차: setup_time·teardown_time·venue_name·venue_address·venue_detail 추가.
+// 라운드트립 소거 방지(2026-06-25 사고) — 편집 폼이 이 응답으로 초기화되므로 신규 5컬럼 필수.
 const EVENT_DETAIL_COLUMNS =
   'id, name, discount_rate, order_url_slug, start_date, end_date, estimated_delivery_date, ' +
   'event_year, host_society, event_season, status, venue, attendee_ids, note, marketing_cost, ' +
-  'draft_done, application_done, payment_resolution_done, prep_note, created_by, visible_categories';
+  'draft_done, application_done, payment_resolution_done, prep_note, created_by, visible_categories, ' +
+  'setup_time, teardown_time, venue_name, venue_address, venue_detail';
 
 /**
  * order_url_slug 로 학회 1건을 가져옵니다. (L2 학회 상세)
@@ -160,4 +163,68 @@ export const getEventViewers = async (eventId) => {
     name: byId[r.user_id]?.name || null,
     position: byId[r.user_id]?.position || '',
   }));
+};
+
+// ─── 준비노트 템플릿(prep_note_templates) CRUD — A12 ───────────────
+// 전용 테이블(events.prep_note 와 별개). 적용 = 본문을 노트에 복사하는 "씨앗".
+// RLS: SELECT authenticated / 쓰기 events:edit. updated_at 자동 트리거 없음 → 앱이 명시 전송.
+
+/**
+ * 준비노트 템플릿 목록(updated_at 내림차순). body_html 포함 로드(행 수 적음 — 적용·수정 시 추가 왕복 없음).
+ * @returns {Promise<Array<{id, name, body_html, updated_at}>>}
+ * @throws {Error} 조회 실패 시(테이블 미적용 포함) — 호출부가 graceful 처리
+ */
+export const getPrepNoteTemplates = async () => {
+  const { data, error } = await supabase
+    .from('prep_note_templates')
+    .select('id, name, body_html, updated_at')
+    .order('updated_at', { ascending: false });
+  if (error) {
+    console.error('Error fetching prep note templates:', error);
+    throw error;
+  }
+  return data || [];
+};
+
+/**
+ * 준비노트 템플릿 생성. created_by = DB default(auth.uid()).
+ * @param {{ name: string, body_html: string }} patch
+ * @throws {Error} 저장 실패 시
+ */
+export const createPrepNoteTemplate = async ({ name, body_html }) => {
+  const { error } = await supabase.from('prep_note_templates').insert([{ name, body_html }]);
+  if (error) {
+    console.error('Error creating prep note template:', error);
+    throw error;
+  }
+};
+
+/**
+ * 준비노트 템플릿 수정. updated_at 자동 트리거가 없어 앱이 함께 전송한다(마이그레이션 주석 참조).
+ * @param {number} id
+ * @param {{ name: string, body_html: string }} patch
+ * @throws {Error} 저장 실패 시
+ */
+export const updatePrepNoteTemplate = async (id, { name, body_html }) => {
+  const { error } = await supabase
+    .from('prep_note_templates')
+    .update({ name, body_html, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) {
+    console.error('Error updating prep note template:', error);
+    throw error;
+  }
+};
+
+/**
+ * 준비노트 템플릿 삭제. 이미 적용된 events.prep_note 에는 영향 없음(복사 씨앗 모델).
+ * @param {number} id
+ * @throws {Error} 삭제 실패 시
+ */
+export const deletePrepNoteTemplate = async (id) => {
+  const { error } = await supabase.from('prep_note_templates').delete().eq('id', id);
+  if (error) {
+    console.error('Error deleting prep note template:', error);
+    throw error;
+  }
 };

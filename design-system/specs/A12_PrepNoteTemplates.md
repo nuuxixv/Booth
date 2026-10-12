@@ -4,6 +4,7 @@
 > 시안과 실서비스 구현은 이 시트의 모든 항목을 1:1로 반영해야 한다.
 > 임의 단순화·통합·생략은 건우님의 명시적 승인 후 이 시트를 먼저 갱신한 다음에만 허용된다.
 > 신설 2026-10-12 (학회 개선 트랙 2차 — DB 변경 포함분). 건우님 2026-10-12 "권장안대로" 일괄 승인 범위.
+> **상태: 구현 완료(2026-10-12, frontend-engineer) — SQL(`20261012000100_create_prep_note_templates.sql`) 적용 후 라이브 확인 대기.** 전제 = "SQL 적용 → 프론트 배포" 순서. 관리 모달·API CRUD·`PrepNoteEditor disableImage`·L2 "템플릿으로 시작"·기본 템플릿 UI 1회 저장 구현됨. `prep_note_templates` 조회 실패 시 "템플릿으로 시작"만 숨기고 준비노트 전체는 정상 동작(graceful).
 
 ## 설계 목표
 
@@ -58,7 +59,8 @@
 
 ### 1-3. 목록 뷰
 - [ ] `DialogTitle` = "준비노트 템플릿". 상단 보조 문구 1줄: "여기서 만든 템플릿을 학회 준비 노트에서 꺼내 쓸 수 있어요. 템플릿을 고쳐도 이미 작성한 노트에는 영향이 없습니다."
-- [ ] 상단 우측 **"새 템플릿"** 버튼(contained, `events:edit`) → 편집 뷰(신규) 진입.
+- [x] 상단 우측 **"새 템플릿"** 버튼(contained, `events:edit`) → 편집 뷰(신규) 진입.
+  - [x] **기본 템플릿 등록 편의(구현 2026-10-12):** 템플릿이 **0개**인 상태에서 "새 템플릿"을 누르면 이름 **"기본 준비노트"** + 본문에 §3 초안(마크다운 원문)이 **미리 채워진** 편집 뷰로 열린다(에디터 markdown 모드). 건우님이 확인·수정 후 **저장 1번**으로 기본 템플릿 생성(§3-1 "UI 1회 저장"). **1개 이상이면 기존대로 빈 편집 뷰.** 초안 원문은 `PrepNoteTemplateDialog.jsx` 상수 `DEFAULT_PREP_NOTE_MARKDOWN`(출처 주석 = A12 §3).
 - [ ] 목록 행(List) — 각 행:
   - [ ] **이름**(`name`, primary, fontWeight 600)
   - [ ] **수정일**(`updated_at`, secondary caption, `YYYY.MM.DD` 점 표기·tnum)
@@ -169,8 +171,9 @@
 
 ### 3-1. seed 저장 형식 (구현 참고)
 - [ ] 저장본은 **HTML**(`body_html`) — Toast UI `getHTML()` 결과. 위 마크다운은 사람이 읽는 초안 표현이고, 실제 저장은 에디터가 변환한 HTML이다(`PrepNoteEditor` 동작 — 마크다운 모드로 작성해도 `getHTML()` HTML을 반환, 기존 `prep_note`·Viewer와 동일 정합).
-- [ ] **seed 생성 방식(권장):** 손으로 만든 Toast UI HTML은 깨지기 쉬우므로, **배포 후 "준비노트 템플릿" 화면에서 위 초안을 Markdown 탭에 붙여넣어 1회 저장**(getHTML이 정확한 HTML·뷰어 라운드트립 보장). 건우님 검토·수정도 이 과정에서 자연스럽게 이뤄진다.
-- [ ] **대안:** 마이그레이션 `INSERT`로 seed 1행(created_by null). 이 경우 body_html은 에디터로 1회 만든 HTML을 그대로 넣어야 함(마크다운 원문 직저장 시 Viewer가 체크박스를 못 그림). → 방식 선택은 CTO/engineer 판단(보고서 §후속 요청).
+- [x] **seed 생성 방식(구현 채택):** 손으로 만든 Toast UI HTML은 깨지기 쉬우므로 마이그레이션 `INSERT` 시드는 넣지 않고(테이블 빈 상태로 생성), **"준비노트 템플릿" 화면에서 §3 초안을 markdown 모드로 1회 저장**해 기본 템플릿을 만든다. 구현(2026-10-12)은 이를 자동화: 템플릿 0개에서 "새 템플릿" → 초안 마크다운이 markdown 모드로 미리 채워진 편집 뷰가 열려 **저장 1번**으로 완성(getHTML이 정확한 HTML·Viewer 라운드트립 보장). 건우님 검토·수정도 이 과정에서 자연스럽게 이뤄진다.
+  - markdown 모드 강제 이유: `PrepNoteEditor`는 내용이 있으면 wysiwyg 기본인데, 마크다운 원문을 wysiwyg로 열면 raw 텍스트로 보인다 → 기본 초안은 `initialEditType="markdown"`로 전달해 마크다운 소스가 그대로 보이게 한다.
+- 기각(대안): 마이그레이션 `INSERT` 시드 1행 — 마크다운 원문 직저장 시 Viewer가 체크박스를 못 그리고, HTML을 손으로 넣으면 깨지기 쉬움. 위 "UI 1회 저장"으로 대체.
 
 ---
 
@@ -226,4 +229,5 @@
 8. **AI 시그니처 금지(`룰 E`).** 가짜 통계·그라데이션·장식 인디케이터 없음. 목록은 이름·수정일·수정·삭제만.
 
 ## 8. 변경 이력
+- **2026-10-12 구현 완료(frontend-engineer) — SQL 적용 후 라이브 확인 대기.** `api/events.js`에 CRUD 4종(get/create/update/delete, update는 `updated_at` 함께 전송 — DB 트리거 없음). `PrepNoteTemplateDialog.jsx` 신규(단일 Dialog 목록↔편집 모드 스왑, maxWidth md·모바일 fullScreen, 목록=이름·수정일·수정·삭제·updated_at desc, 편집=이름 필수+PrepNoteEditor lazy·저장 게이트·no-op 가드, 삭제 확인=`window.confirm`, 빈/로딩/오류 토스트 §6 문구). `PrepNoteEditor` `disableImage` prop 추가(툴바 image 제거+업로드/붙여넣기/드래그 거부+안내 토스트, 기본 false=기존 소비처 불변). A10 PageHeader "준비노트 템플릿"(outlined, "학회 목록 관리" 옆·"학회 추가" 왼쪽, events:edit만). L2 빈 노트 "템플릿으로 시작"(templates≥1·canEdit·편집 아님일 때만, Menu 선택 → `noteSeed`·`editorKey+1`·`editingNote`, `noteDraft.dismiss()`로 draft 우선, 저장은 기존 `handleSaveNote`). 기본 템플릿 UI 1회 저장(§1-3·§3-1). **빈 노트 EmptyState는 2액션(작성하기+템플릿으로 시작)이라 공용 `EmptyState` 컴포넌트 대신 동일 톤의 로컬 센터 블록으로 렌더**(EmptyState는 action 1개만 지원). graceful: `prep_note_templates` 조회 실패 시 "템플릿으로 시작" 숨김·페이지 정상.
 - 2026-10-12 신설 — 학회 개선 트랙 2차(DB 변경 포함). 전용 테이블 `prep_note_templates`, 관리 모달(목록↔편집 모드 스왑), L2 빈 노트 "템플릿으로 시작" 적용 흐름, 기본 템플릿 1건 초안(2026-06 백업 노트 5건 공통 구조). 1차 이미지 비활성·빈 노트 전용·기존 prep_note 경로 재사용. 건우님 "권장안대로" 승인(`project_booth_event_flow_track`).
