@@ -3,7 +3,8 @@
 > 이 시트는 어드민 주문 상세·편집 모달의 정보·기능·데이터 구조의 단일 진실 소스다.
 > 시안 부재 화면이므로 실 컴포넌트(`OrderDetailModal.jsx`)가 사실상의 기획이다. 시안이 작성되면 이 시트에 모든 항목이 1:1로 반영되어야 한다.
 > 임의 단순화·통합·생략은 건우님의 명시적 승인 후 이 시트를 먼저 갱신한 다음에만 허용된다.
-> 마지막 갱신: 2026-08-25 **상품 추가 = 고객 프론트 상품 선택 UX 재사용**(frontend-engineer, tech-cto 위임). 편집 모드 "상품 추가" 버튼이 **첫 상품 자동 삽입**을 폐기하고 신규 `ProductPickerDialog`(고객 `ProductSelectionStep` 재사용: 검사군 트리·검색·인기/신규 필터)를 연다. 담기 임시 카트 확정 시 각 항목을 `editedOrderItems`에 `{product_id, quantity}`로 append(이미 있는 상품이면 **수량 합산**, 중복 행 금지). 가격·스냅샷은 기존 파이프라인(useEffect 재계산 + handleSaveItems payload)이 그대로 처리 — 신설 없음. 어드민 자유도 원칙상 `visibleCategories=null`(전 상품 노출). 태그 우선 정렬은 행사 `tags ∪ host_society`(getEvents가 host_society 미포함이라 admin에선 tags만, graceful). 기존 행별 Autocomplete는 담긴 행 교체·수정용으로 유지. `ProductSelectionStep` 내부 무수정. 검증: build·lint 신규 0, 전체 테스트 294 pass·2 fail(기존 편집버튼 다중매칭, 증가 0).
+> 마지막 갱신: 2026-10-12 **stale 테스트 2건 정합화 + 편집 진입 서술 정리**. `OrderDetailModal.test.jsx`의 실패 2건(전역 `/편집/i` 버튼 단일 조회 → 섹션별 Edit 아이콘 4개 다중매칭, `update_order_details` RPC 기대)은 78e440f(2026-07-07 섹션별 인라인 편집 재설계, CTO·CPO 검수 통과)부터 이어진 **테스트 쪽 불일치**로 판정(코드 회귀 아님 — 코드 무수정). 테스트를 섹션 제목 기준 편집 버튼 조회 + `orders` 부분 UPDATE 기대로 교체, 회귀 테스트 상품 목에 `is_discountable:true` 보강(412ba7b 할인 공식 정합). 두 테스트 모두 변이 검증(배송비 할인가 기준 회귀·주문자명 UPDATE 누락을 주입하면 실패) 확인. 시트 본문에 남아 있던 전역 "편집/저장 토글"·헤더 아이콘·`handleSaveAll` 서술을 현행으로 정리. 검증: 전체 vitest 329 pass·0 fail·2 skip, lint 0.
+> 이전 갱신: 2026-08-25 **상품 추가 = 고객 프론트 상품 선택 UX 재사용**(frontend-engineer, tech-cto 위임). 편집 모드 "상품 추가" 버튼이 **첫 상품 자동 삽입**을 폐기하고 신규 `ProductPickerDialog`(고객 `ProductSelectionStep` 재사용: 검사군 트리·검색·인기/신규 필터)를 연다. 담기 임시 카트 확정 시 각 항목을 `editedOrderItems`에 `{product_id, quantity}`로 append(이미 있는 상품이면 **수량 합산**, 중복 행 금지). 가격·스냅샷은 기존 파이프라인(useEffect 재계산 + handleSaveItems payload)이 그대로 처리 — 신설 없음. 어드민 자유도 원칙상 `visibleCategories=null`(전 상품 노출). 태그 우선 정렬은 행사 `tags ∪ host_society`(getEvents가 host_society 미포함이라 admin에선 tags만, graceful). 기존 행별 Autocomplete는 담긴 행 교체·수정용으로 유지. `ProductSelectionStep` 내부 무수정. 검증: build·lint 신규 0, 전체 테스트 294 pass·2 fail(기존 편집버튼 다중매칭, 증가 0).
 > 이전 갱신: 2026-08-18 **상품 표 행별 할인 가시화**(frontend-engineer, 프리뷰 QA 수정). 할인가 셀에 **할인율 % 보조표기**(정가 대비 역산 `round((1−할인가/정가)×100)` — 스냅샷 주문은 당시 실제율, 0%인 행은 `-`), 합계 셀에 **행별 할인액 보조표기**(`−(정가−할인가)×수량`) 추가. 신규 열이 아닌 셀 보조표기(모달 폭 제약). 계산은 `getDiscountedUnit`/스냅샷 우선 규칙 유지, %는 표시된 정가·할인가에서 역산(표시 정합 보장). 목적: 어떤 상품이 몇 % 할인됐는지 육안 구분 + **고객(정가·%·할인가) < 어드민(정가·%·할인가·할인액)** 정보량 원칙. 검증: build·lint 신규 0·pricing.test 14. (OrderDetailModal.test 편집버튼 다중매칭 실패 2건은 기존 실패로 무관 — HEAD 베이스라인 동일 확인.)
 > 이전 갱신: 2026-08-18 **편집 상품 금액 계산 정정 + 스냅샷 우선**(frontend-engineer, tech-cto 위임). 상품 편집 소계 재계산(useEffect)·저장 payload(order_items 직접 write)·표 표시 3곳(OrderSections)의 할인가를 공용 유틸 `getDiscountedUnit(product, discountRate)`로 교체. 기존 `originalPrice*(1-discountRate)`는 **`Math.round` 누락·`is_discountable` 미반영·`discount_override` 미반영**이었음(동시 해소). **저장 payload는 서버(create-order)를 우회하는 직접 DB write라 이 공식이 정본.** 배송비 판정은 정가(할인 전) 총액 기준 유지(회귀 가드 보존). **표 표시(비편집=기존 아이템)는 스냅샷 우선** — `item.price_at_purchase`가 있으면 그걸 표시, 없을 때만 유틸 폴백. **동작 변경**: 과거 비할인(is_discountable=false) 상품에도 행사 할인이 잘못 적용되던 표시·저장이 바로잡힘(운영 DB 불일치 0건 확인 — 깨질 기존 동작 없음). **근인 = `OrderManagementPage:237` productsMap 화이트리스트**에 `is_discountable`이 없어 OrderSections가 못 보던 것 → map에 `is_discountable`·`discount_override` 추가. 검증: build·lint 신규 0·pricing.test 14. (참고: `OrderDetailModal.test`의 편집 버튼 다중매칭 실패 2건은 SectionCard 다(多)편집 리팩터 이후 잔존한 기존 실패로 본 작업과 무관 — mockProducts에 `is_discountable:true` 추가해 렌더 테스트만 정합화.)
 > 이전 갱신: 2026-07-07 섹션별 인라인 편집 재설계.
@@ -11,7 +12,8 @@
 ## 참조 파일
 - 상품 추가 피커: `inpsyt-order-frontend/src/components/ProductPickerDialog.jsx` — 고객 `ProductSelectionStep` 재사용 래퍼(2026-08-25). `OrderSections`의 편집 모드 "상품 추가"가 여는 다이얼로그
 - 재사용 원본: `inpsyt-order-frontend/src/components/ProductSelectionStep.jsx` (고객 주문서 step0, 무수정 재사용). `fetchAllProducts`·`fetchTestGroups` 자체 호출
-- 실 컴포넌트: `inpsyt-order-frontend/src/components/OrderDetailModal.jsx` (607줄)
+- 실 컴포넌트: `inpsyt-order-frontend/src/components/OrderDetailModal.jsx` (헤더·⋮메뉴·삭제·합배송 연계·푸터 래퍼) + `inpsyt-order-frontend/src/components/OrderSections.jsx` (섹션 본문·섹션별 인라인 편집 로직, 2026-07-08 추출)
+- 테스트: `inpsyt-order-frontend/src/components/OrderDetailModal.test.jsx` — 렌더·배송비 정가 기준 회귀·주문자 섹션 저장(`orders` 부분 UPDATE, RPC 미호출). 편집 버튼은 섹션마다 하나라 **섹션 제목 기준으로 조회**(`getSectionEditButton`)
 - 호출 위치: `inpsyt-order-frontend/src/components/OrderManagementPage.jsx` 행 클릭 시
 - 관련 API:
   - `src/api/orders.js` — `linkOrders`(parentOrderId, childOrderId, settings), `searchOrdersForLinking`(term, excludeOrderId)
@@ -27,7 +29,7 @@
     - 상품(비연계 단일 주문만): `order_items.delete().eq('order_id', order.id)` → `order_items.insert(bulk)` → `orders.update({ total_cost, discount_amount, delivery_fee, final_payment }).eq('id', order.id)` (`handleSaveItems`)
   - `supabase.from('orders').update({ status }).eq('id', order.id)` — 상태만 변경(현행 유지)
   - `supabase.from('order_items').delete().eq('order_id', order.id)` + `supabase.from('orders').delete().eq('id', order.id)` (line 274-277) — 삭제
-- DB 함수: `supabase/migrations/20260415_004_update_order_functions.sql` 의 `update_order_details(order_id_param int, updates_param jsonb, items_param jsonb)`
+- DB 함수: `supabase/migrations/20260415_004_update_order_functions.sql` 의 `update_order_details(order_id_param int, updates_param jsonb, items_param jsonb)` — **이 모달에서는 2026-07-07부터 미사용**(함수 자체는 잔존)
 - 상태 이력 트리거: `supabase/migrations/20260406_add_status_history_to_orders.sql` — `status` 변경 시 `status_history` jsonb에 자동 누적
 - 결제완료 알림 트리거: `supabase/migrations/20250722070342_create_paid_order_trigger.sql` (`notify_order_paid`) — DB 알림만, 알림톡과 무관
 - 알림톡 발송 사양: `ONESHOT.md` (msgagent 구형 TLS → 브라우저 직접 fetch만 가능)
@@ -35,13 +37,13 @@
 - 상태 한국어 매핑(전달받음): `inpsyt-order-frontend/src/constants/orderStatus.js` 의 `STATUS_TO_KOREAN`
 
 ## 사용자 시나리오
-어드민(master·editor·viewer)이 주문 관리 페이지에서 한 행을 클릭하면 이 모달이 열린다. 학회 종료 후 사무실에서 결제 누락분을 paid로 바꾸고 알림톡이 자동 발송되는 것을 확인하거나, 고객이 전화로 주소를 정정해 달라고 하면 편집 모드로 들어가서 학회·고객명·연락처·주소·상품 구성·관리자 메모를 수정하고 저장한다. 같은 고객이 학회 폐막 후 “책 1권만 추가요”라고 하면 “연계 주문 연결”로 원주문을 찾아 child로 묶어 배송비 절감 효과를 즉시 확인한다. master는 잘못 들어온 주문을 통째로 삭제할 수 있다. viewer는 모든 컨트롤이 비활성화돼 조회만 가능하다. 데스크톱에서는 가운데 정렬된 카드 모달, 모바일·태블릿에서는 하단에서 올라오는 Drawer.
+어드민(master·editor·viewer)이 주문 관리 페이지에서 한 행을 클릭하면 이 모달이 열린다. 학회 종료 후 사무실에서 결제 누락분을 paid로 바꾸고 알림톡이 자동 발송되는 것을 확인하거나, 고객이 전화로 주소를 정정해 달라고 하면 해당 섹션(주문자·배송지·관리자 메모·상품)의 편집 아이콘을 눌러 그 섹션만 수정하고 저장한다(학회는 읽기전용). 같은 고객이 학회 폐막 후 “책 1권만 추가요”라고 하면 “연계 주문 연결”로 원주문을 찾아 child로 묶어 배송비 절감 효과를 즉시 확인한다. master는 잘못 들어온 주문을 통째로 삭제할 수 있다. viewer는 모든 컨트롤이 비활성화돼 조회만 가능하다. 데스크톱에서는 가운데 정렬된 카드 모달, 모바일·태블릿에서는 하단에서 올라오는 Drawer.
 
 ## 진입 흐름
 - 진입: `OrderManagementPage`의 테이블 행 클릭(체크박스·상태 셀 제외) 또는 모바일 카드 클릭
 - prop으로 받는 값: `order`, `open`, `onClose`, `statusToKorean`, `productsMap`, `products`, `events`, `addNotification`, `onUpdate`, `productsLoading`, `hasPermission`
 - 모달 사이즈: 데스크톱 maxWidth 800, 모바일 SwipeableDrawer(95vh)
-- `order.access_token` 있으면 헤더에 “고객 주문 조회 페이지” 외부 링크 아이콘 표시 (line 349-360)
+- `order.access_token` 있으면 헤더 ⋮ 메뉴에 “고객 주문서 열기” 항목 표시 (2026-07-07 헤더 아이콘 → ⋮ 메뉴 이동)
 
 ## 표시 정보 (라벨 단위, 누락 금지)
 
@@ -224,9 +226,9 @@
 
 `hasPermission(key)` 호출 기준:
 
-- [ ] **master**: 모든 기능 + 삭제 아이콘 노출
-- [ ] **`orders:edit` 보유 (editor 포함)**: 편집/저장 토글·상태 Select 활성·연계 연결·알림톡 재발송 활성. 삭제는 불가.
-- [ ] **`orders:view` 만 보유 (viewer)**: 모든 입력·버튼 disabled. 상태 Select도 disabled. 조회만 가능.
+- [ ] **master**: 모든 기능 + ⋮ 메뉴 “주문건 삭제” 노출
+- [ ] **`orders:edit` 보유 (editor 포함)**: 섹션별 Edit 아이콘(주문자·배송지·관리자 메모·상품)·상태 Select 활성·연계 연결·알림톡 재발송 활성. 삭제는 불가.
+- [ ] **`orders:view` 만 보유 (viewer)**: 섹션 Edit 아이콘 비노출, 상태 Select disabled. 조회만 가능.
 - [ ] (참고) `orders:view` 권한 없으면 OrderManagementPage 자체에 진입 불가하므로 이 모달도 열리지 않음
 
 ## 데이터 모델
@@ -250,7 +252,7 @@
 ### `order_items` (조회·일괄 재삽입)
 - `id, order_id, product_id, quantity, price_at_purchase`
 - 스냅샷: `product_name, product_code, category, list_price`
-- `on_site_pickup` (boolean, DEFAULT false) — 상품별 현장수령(출고 제외) 플래그. 현장수령 체크박스가 `.eq('id', item.id)` 직접 UPDATE. `handleSaveAll`의 items_param에도 `on_site_pickup` 포함(편집저장 시 유실 방지). `ALL_ITEMS_SELECT`(api/orders.js)에 `id, on_site_pickup` 포함
+- `on_site_pickup` (boolean, DEFAULT false) — 상품별 현장수령(출고 제외) 플래그. 현장수령 체크박스가 `.eq('id', item.id)` 직접 UPDATE. 상품 섹션 저장(`handleSaveItems`)의 재삽입 payload에도 `on_site_pickup` 포함(편집저장 시 유실 방지). `ALL_ITEMS_SELECT`(api/orders.js)에 `id, on_site_pickup` 포함
 
 ### `events` (join)
 - `id, name, discount_rate`
@@ -300,9 +302,9 @@
 
 - 모달 구조 7섹션 유지: 헤더 → 주문 상세 → 상태 이력 → 주문자 정보 → 배송지 정보 → 관리자 메모 → 연계 주문 → 주문 상품 목록 → 결제 정보 → 푸터
 - 배송지 정보는 3-row Table 유지 (우편번호·주소·상세 주소 분리)
-- 편집/조회 토글은 한 버튼에서 “편집 ↔ 저장”으로 전환 유지
-- 상태 Select는 편집 토글 무관 항상 활성 (단, viewer는 disabled)
-- 알림톡 재발송 버튼은 별도 노출(헤더), 자동 발송과 수동 발송의 분리 의도 유지
+- 편집은 섹션별 인라인(Edit 아이콘 → [취소]·[저장]), 한 번에 한 섹션만 (2026-07-07 재설계로 전역 “편집 ↔ 저장” 토글 대체)
+- 상태 Select는 섹션 편집 무관 항상 활성 (단, viewer는 disabled)
+- 알림톡 재발송 버튼은 “알림톡” InfoRow 우측 인라인 노출(2026-07-07 헤더에서 이동), 자동 발송과 수동 발송의 분리 의도 유지
 - 모바일은 SwipeableDrawer(bottom, 95vh), 데스크톱은 가운데 정렬 카드(maxWidth 800)
 
 ## 변경 이력
@@ -347,3 +349,10 @@
   - **묶음 합계 유도** (`combinedOrderTotals`): 정가 합 = Σ `total_cost`, 할인가 합 = Σ (`final_payment` − `delivery_fee`). `final_payment = 할인가 합 + delivery_fee` 불변식은 배송비를 조정하는 전 경로(create-order·합배송 RPC)가 두 값을 함께 갱신해 유지.
   - **서버 3 RPC 동일 규칙**: `link_orders_into_group`·`reassign_group_representative`·`delete_order_group`이 같은 기준으로 재판정(마이그레이션 `20260825000100`). basis 컬럼 미적용 환경은 create-order 와 동일한 undefined_column graceful fallback → 정가 폴백.
   - **회귀 0**: basis NULL('미설정')·'list_price'면 판정식 기존과 동일(정가 합 ≥ 임계치). 0원 무료 규칙(create-order 의 0원 → 무료)은 합배송엔 기존에도 없었고 이번에도 도입하지 않음(동작 무변경 우선).
+- 2026-10-12 stale 테스트 2건 정합화 (코드 무수정) —
+  - **판정**: 실패 원인은 테스트가 전역 편집 버튼 1개(`getByRole('button', { name: /편집/i })`)와 `update_order_details` RPC를 기대한 것. 현행 UI는 섹션별 Edit 아이콘(title “편집”) 4개 → 다중매칭 throw. 78e440f(2026-07-07, CTO·CPO 검수 통과) 의도된 재설계이므로 **테스트를 현행에 맞춤**.
+  - **[REGRESSION] 배송비 정가 기준**: '주문 상품 목록' 섹션 편집 버튼으로 진입 → `총 결제 금액` 행이 28,800원인지 직접 단언(기존 `getAllByText` ≥1은 표 셀만으로도 통과하던 약한 단언) + 31,800원 부재. 고가 상품 목에 `is_discountable:true` 추가(412ba7b 이후 할인 대상만 행사율 적용).
+  - **주문자 섹션 저장**: '주문자 정보' 섹션 편집 → 주문자명 변경 → [저장] → `from('orders').update({ customer_name: '김민준', … }).eq('id', 1)` + `rpc` 미호출 + 토스트 “주문자 정보가 저장되었습니다.” 단언. 모킹 chain에 `update` 추가.
+  - **변이 검증**: 배송비 판정을 할인가 기준으로 바꾸면 회귀 테스트 실패, 주문자명을 UPDATE에서 빼면 저장 테스트 실패 — 두 테스트가 실제 결함을 잡음을 확인 후 원복.
+  - **시트 본문 정리**: 참조 파일(OrderSections·테스트 추가, 줄 수 삭제), 사용자 시나리오·진입 흐름·권한별 차이·시안 부재 결정의 전역 “편집/저장 토글”·헤더 아이콘 서술, `order_items`의 `handleSaveAll` 서술을 현행으로 갱신. 정보 구조·필드·액션 변경 0.
+  - **검증**: 전체 vitest 329 pass·0 fail·2 skip(기존 2 fail 해소), 테스트 파일 lint 0.
