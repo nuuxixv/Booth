@@ -9,7 +9,6 @@ import {
   ListItemIcon,
   ListItemText,
   Box,
-  Typography,
   IconButton,
   Tooltip,
   Badge,
@@ -76,25 +75,7 @@ const AdminSidebar = ({ open, onClose, collapsed = false, onToggleCollapse }) =>
 
   const drawerContent = (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Logo / Branding */}
-      <Box sx={{
-        px: collapsed ? 0 : 2.5,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: collapsed ? 'center' : 'flex-start',
-        gap: collapsed ? 0 : 1.25,
-        height: 64,
-      }}>
-        <img src="/LOGO.svg" alt="logo" style={{ height: 32 }} />
-        {!collapsed && (
-          <Typography variant="body1" sx={{ fontWeight: 600, color: theme.gray[900], letterSpacing: '-0.015em', whiteSpace: 'nowrap' }}>
-            인싸이트 현장주문
-          </Typography>
-        )}
-      </Box>
-
-      {/* 브랜딩 아래 구분선 */}
-      <Box sx={{ height: '1px', bgcolor: theme.gray[100], mx: collapsed ? 1.25 : 2 }} />
+      {/* 사이드바 로고·서비스명 없음 — 서비스 표기는 헤더 좌상단 "Booth" 1곳(BRAND_Booth.md §3, 2026-10-12) */}
 
       {/* Menu items */}
       <List sx={{ px: 1.25, py: 1.5, flexGrow: 1 }}>

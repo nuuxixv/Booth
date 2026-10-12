@@ -169,15 +169,34 @@ const AdminHeader = ({
         zIndex: 100,
       }}
     >
-      {/* 좌측: 모바일 햄버거 메뉴 */}
-      <IconButton
-        onClick={onMenuToggle}
-        size="medium"
-        sx={{ display: { md: 'none' }, color: theme.gray[600] }}
-        aria-label="메뉴 열기"
-      >
-        <MenuIcon />
-      </IconButton>
+      {/* 좌측: (모바일) 햄버거 + Booth 워드마크 상시 앵커 (BRAND_Booth.md §4) */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, md: 0 } }}>
+        <IconButton
+          onClick={onMenuToggle}
+          size="medium"
+          sx={{ display: { md: 'none' }, color: theme.gray[600] }}
+          aria-label="메뉴 열기"
+        >
+          <MenuIcon />
+        </IconButton>
+        <Typography
+          component="div"
+          onClick={() => navigate('/admin/dashboard')}
+          role="button"
+          aria-label="Booth 대시보드로 이동"
+          sx={{
+            fontSize: { xs: 20, md: 22 },
+            fontWeight: 800,
+            color: 'text.primary',
+            letterSpacing: '-0.02em',
+            lineHeight: 1,
+            cursor: 'pointer',
+            userSelect: 'none',
+          }}
+        >
+          Booth
+        </Typography>
+      </Box>
 
       {/* 우측 */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 'auto' }}>
