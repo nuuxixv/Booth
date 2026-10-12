@@ -37,7 +37,6 @@ import {
   Settings as SettingsIcon,
   Delete as DeleteIcon,
   QrCode2 as QrCode2Icon,
-  Download as DownloadIcon,
   FilterList as FilterListIcon,
   MoreVert as MoreVertIcon,
   PlaceOutlined as PlaceIcon,
@@ -45,16 +44,20 @@ import {
   LocalOffer as LocalOfferIcon,
   StarBorder as StarBorderIcon,
   ReceiptLong as ReceiptLongIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
+  HistoryToggleOff as HistoryIcon,
 } from '@mui/icons-material';
-import QRCode from 'qrcode';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../hooks/useAuth';
 import { useNotification } from '../hooks/useNotification';
 import { getTodayKST, getEventStatusKST } from '../utils/date';
+import { buildOrderUrl, copyToClipboard, generateOrderQrSvg, downloadQrSvg } from '../utils/eventUrl';
 import TableSkeleton from './TableSkeleton';
 import SocietyManagementDialog from './SocietyManagementDialog';
 import PaymentReceiptModal from './PaymentReceiptModal';
+import EventQrDialog from './EventQrDialog';
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from './ui';
 
 const dot = (iso) => (iso ? iso.replaceAll('-', '.') : '');
@@ -62,6 +65,7 @@ const dot = (iso) => (iso ? iso.replaceAll('-', '.') : '');
 // getEventStatusKST color('info'/'success'/'default') → StatusBadge 토큰.
 // 예정→pending(주) · 진행중→paid(녹) · 종료→completed(보).
 const STATUS_COLOR_TO_BADGE = { info: 'pending', success: 'paid', default: 'completed' };
+const isEnded = (start, end) => getEventStatusKST(start, end).label === '종료';
 
 const EventStateBadge = ({ startDate, endDate }) => {
   const st = getEventStatusKST(startDate, endDate);
@@ -155,6 +159,190 @@ const AttendeeCell = ({ ids = [], staffMap, myId }) => {
   );
 };
 
+// ─── 데스크톱 표 행 ──────────────────────────────────────────────
+const EventRow = ({ index, event, isUpcoming, staffMap, myId, onOpenMenu, onRowClick }) => {
+  const theme = useTheme();
+  const ended = isEnded(event.start_date, event.end_date);
+  return (
+    <TableRow
+      hover
+      onClick={() => onRowClick(event)}
+      sx={{
+        cursor: 'pointer',
+        bgcolor: isUpcoming ? alpha(theme.palette.primary.main, 0.04) : ended ? theme.gray[50] : 'transparent',
+        boxShadow: isUpcoming ? `inset 3px 0 0 ${theme.palette.primary.main}` : 'none',
+        '& td': ended ? { color: 'text.secondary' } : undefined,
+        '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.02) },
+        transition: `background-color 0.15s ${theme.easing.toss}`,
+      }}
+    >
+      <TableCell sx={{ width: 56 }}>
+        <Typography variant="body2" sx={{ color: 'text.disabled', fontWeight: 500, fontFeatureSettings: '"tnum" 1' }}>
+          {index}
+        </Typography>
+      </TableCell>
+      <TableCell sx={{ minWidth: 160 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {isUpcoming && (
+            <Tooltip title="내 참석 다음 학회" arrow placement="top">
+              <StarBorderIcon sx={{ fontSize: 16, color: 'primary.main', flexShrink: 0 }} />
+            </Tooltip>
+          )}
+          <Typography variant="body2" sx={{ fontWeight: 700, color: ended ? 'text.secondary' : 'text.primary' }}>
+            {event.host_society || event.name}
+          </Typography>
+        </Box>
+        <Box sx={{ mt: 0.5 }}>
+          <EventStateBadge startDate={event.start_date} endDate={event.end_date} />
+        </Box>
+      </TableCell>
+      <TableCell sx={{ minWidth: 180 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+          <Typography variant="body2" sx={{ fontWeight: 500 }}>{event.event_season}</Typography>
+          <DiscountChip rate={event.discount_rate} />
+        </Box>
+      </TableCell>
+      <TableCell sx={{ minWidth: 120 }}>
+        <Typography variant="body2" sx={{ fontWeight: 500, fontFeatureSettings: '"tnum" 1' }}>
+          {dot(event.start_date)}
+        </Typography>
+        {event.end_date && event.end_date !== event.start_date && (
+          <Typography variant="caption" sx={{ color: 'text.secondary', fontFeatureSettings: '"tnum" 1' }}>
+            ~ {dot(event.end_date)}
+          </Typography>
+        )}
+      </TableCell>
+      <TableCell sx={{ minWidth: 140 }}>
+        {event.venue ? (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <PlaceIcon sx={{ fontSize: 15, color: 'text.disabled', flexShrink: 0 }} />
+            <Typography variant="body2" sx={{ color: ended ? 'text.secondary' : 'text.primary' }}>
+              {event.venue}
+            </Typography>
+          </Box>
+        ) : (
+          <Typography variant="body2" sx={{ color: 'text.disabled' }}>—</Typography>
+        )}
+      </TableCell>
+      <TableCell sx={{ minWidth: 150 }}>
+        <AttendeeCell ids={event.attendee_ids} staffMap={staffMap} myId={myId} />
+      </TableCell>
+      <TableCell align="right" sx={{ width: 56 }}>
+        <IconButton
+          size="small"
+          onClick={(e) => { e.stopPropagation(); onOpenMenu(e.currentTarget, event); }}
+          sx={{ color: 'text.secondary', '&:hover': { bgcolor: theme.gray[100], color: 'text.primary' } }}
+          aria-label="행 메뉴 열기"
+        >
+          <MoreVertIcon sx={{ fontSize: 20 }} />
+        </IconButton>
+      </TableCell>
+    </TableRow>
+  );
+};
+
+// ─── 모바일 카드 ─────────────────────────────────────────────────
+const EventMobileCard = ({ event, isUpcoming, staffMap, myId, onOpenMenu, onRowClick }) => {
+  const theme = useTheme();
+  const ended = isEnded(event.start_date, event.end_date);
+  return (
+    <Box
+      onClick={() => onRowClick(event)}
+      sx={{
+        bgcolor: ended ? theme.gray[50] : 'background.paper',
+        border: `1px solid ${isUpcoming ? alpha(theme.palette.primary.main, 0.3) : theme.gray[200]}`,
+        borderLeft: isUpcoming ? `3px solid ${theme.palette.primary.main}` : `1px solid ${theme.gray[200]}`,
+        borderRadius: `${theme.radii.lg}px`,
+        p: 2,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 1.25,
+        cursor: 'pointer',
+        transition: `all 0.2s ${theme.easing.toss}`,
+        '&:hover': { borderColor: theme.gray[300] },
+      }}
+    >
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <EventStateBadge startDate={event.start_date} endDate={event.end_date} />
+        <DiscountChip rate={event.discount_rate} />
+        <Box sx={{ ml: 'auto' }}>
+          <IconButton
+            size="small"
+            onClick={(e) => { e.stopPropagation(); onOpenMenu(e.currentTarget, event); }}
+            sx={{ color: 'text.secondary' }}
+            aria-label="행 메뉴 열기"
+          >
+            <MoreVertIcon sx={{ fontSize: 20 }} />
+          </IconButton>
+        </Box>
+      </Box>
+
+      <Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+          {isUpcoming && <StarBorderIcon sx={{ fontSize: 16, color: 'primary.main' }} />}
+          <Typography variant="subtitle1" sx={{ color: ended ? 'text.secondary' : 'text.primary', lineHeight: 1.3 }}>
+            {event.host_society || event.name}
+          </Typography>
+        </Box>
+        <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.25 }}>
+          {event.event_season}
+        </Typography>
+      </Box>
+
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+          <EventNoteIcon sx={{ fontSize: 15, color: 'text.disabled', flexShrink: 0 }} />
+          <Typography variant="body2" sx={{ color: 'text.secondary', fontFeatureSettings: '"tnum" 1' }}>
+            {dot(event.start_date)}
+            {event.end_date && event.end_date !== event.start_date ? ` ~ ${dot(event.end_date)}` : ''}
+          </Typography>
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+          <PlaceIcon sx={{ fontSize: 15, color: 'text.disabled', flexShrink: 0 }} />
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>{event.venue || '—'}</Typography>
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.75 }}>
+          <PersonIcon sx={{ fontSize: 15, color: 'text.disabled', flexShrink: 0, mt: 0.25 }} />
+          <AttendeeCell ids={event.attendee_ids} staffMap={staffMap} myId={myId} />
+        </Box>
+      </Box>
+    </Box>
+  );
+};
+
+// ─── 데스크톱 표 래퍼 ────────────────────────────────────────────
+const EventTable = ({ events, upcomingId, staffMap, myId, onOpenMenu, onRowClick }) => (
+  <TableContainer>
+    <Table>
+      <TableHead>
+        <TableRow>
+          <TableCell>#</TableCell>
+          <TableCell>학회명</TableCell>
+          <TableCell>행사명</TableCell>
+          <TableCell>날짜</TableCell>
+          <TableCell>장소</TableCell>
+          <TableCell>참석자</TableCell>
+          <TableCell align="right" sx={{ width: 56 }} />
+        </TableRow>
+      </TableHead>
+      <TableBody>
+        {events.map((event, i) => (
+          <EventRow
+            key={event.id}
+            index={i + 1}
+            event={event}
+            isUpcoming={event.id === upcomingId}
+            staffMap={staffMap}
+            myId={myId}
+            onOpenMenu={onOpenMenu}
+            onRowClick={onRowClick}
+          />
+        ))}
+      </TableBody>
+    </Table>
+  </TableContainer>
+);
+
 const EventManagementPage = () => {
   const theme = useTheme();
   const navigate = useNavigate();
@@ -176,8 +364,8 @@ const EventManagementPage = () => {
   // ⋯ 메뉴 경유 삭제 확인
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [qrDialogOpen, setQrDialogOpen] = useState(false);
-  const [qrDialogEvent, setQrDialogEvent] = useState(null);
+  const [qrOpen, setQrOpen] = useState(false);
+  const [qrEvent, setQrEvent] = useState(null);
   const [qrSvg, setQrSvg] = useState('');
 
   // 행 ⋯ 메뉴
@@ -187,10 +375,11 @@ const EventManagementPage = () => {
   // 지불증(수당 영수증) 모달
   const [receiptEvent, setReceiptEvent] = useState(null);
 
-  // 필터
-  const [dateFilter, setDateFilter] = useState('year'); // 'year'(기본) | 'h1' | 'h2'
+  // 필터 — 기간 기본값 "전체"(종료 영역에만 적용). 학회명·참석자·"나"는 양 영역.
+  const [dateFilter, setDateFilter] = useState('all'); // 'all'(기본) | 'year' | 'h1' | 'h2'
   const [societyFilter, setSocietyFilter] = useState('all');
   const [attendeeFilter, setAttendeeFilter] = useState('all'); // 'all' | 'me' | userId
+  const [endedOpen, setEndedOpen] = useState(false); // 종료 접힘(기본 접힘)
 
   const staffMap = useMemo(() => Object.fromEntries(staff.map((s) => [s.id, s])), [staff]);
 
@@ -244,41 +433,29 @@ const EventManagementPage = () => {
     }
   };
 
-  const handleCopyUrl = (slug) => {
-    const url = `${window.location.origin}/order?events=${slug}`;
-    navigator.clipboard.writeText(url);
-    addNotification('주문 URL이 클립보드에 복사되었습니다.', 'success');
+  const handleCopyUrl = async (slug) => {
+    const ok = await copyToClipboard(buildOrderUrl(slug));
+    addNotification(
+      ok ? '주문 URL이 클립보드에 복사되었습니다.' : '주문 URL 복사에 실패했습니다.',
+      ok ? 'success' : 'error',
+    );
   };
 
   const handleOpenQrDialog = async (event) => {
-    const url = `${window.location.origin}/order?events=${event.order_url_slug}`;
     try {
-      const svgStr = await QRCode.toString(url, {
-        type: 'svg',
-        color: { dark: '#252525', light: '#FFFFFF' },
-        margin: 1,
-        width: 300,
-      });
-      setQrSvg(svgStr);
-      setQrDialogEvent(event);
-      setQrDialogOpen(true);
+      const svg = await generateOrderQrSvg(buildOrderUrl(event.order_url_slug));
+      setQrSvg(svg);
+      setQrEvent(event);
+      setQrOpen(true);
     } catch (err) {
       console.error('QR generation error:', err);
       addNotification('QR 코드 생성에 실패했습니다.', 'error');
     }
   };
 
-  const handleDownloadQrSvg = () => {
-    if (!qrSvg || !qrDialogEvent) return;
-    const blob = new Blob([qrSvg], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `qr-${qrDialogEvent.order_url_slug}.svg`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+  const handleDownloadQr = () => {
+    if (!qrSvg || !qrEvent) return;
+    downloadQrSvg(qrSvg, qrEvent.order_url_slug);
     addNotification('QR 코드가 다운로드되었습니다.', 'success');
   };
 
@@ -296,7 +473,7 @@ const EventManagementPage = () => {
   };
   const handleMenuOpenUrl = () => {
     closeMenu();
-    window.open(`${window.location.origin}/order?events=${menuEvent.order_url_slug}`, '_blank');
+    window.open(buildOrderUrl(menuEvent.order_url_slug), '_blank');
   };
   const handleMenuCopyUrl = () => { closeMenu(); handleCopyUrl(menuEvent.order_url_slug); };
   const handleMenuShowQr = () => { const ev = menuEvent; closeMenu(); handleOpenQrDialog(ev); };
@@ -335,13 +512,10 @@ const EventManagementPage = () => {
   }
 
   const today = getTodayKST();
+  const currentYear = new Date().getFullYear();
 
-  // 정렬 ASC + 필터
-  const filteredEvents = events.filter((event) => {
-    const month = event.start_date ? Number(event.start_date.slice(5, 7)) : null;
-    if (dateFilter === 'year' && event.event_year && event.event_year !== new Date().getFullYear()) return false;
-    if (dateFilter === 'h1' && (!month || month > 6)) return false;
-    if (dateFilter === 'h2' && (!month || month <= 6)) return false;
+  // 학회명·참석자·"나" 공통 필터(상단·종료 양 영역 적용)
+  const matchShared = (event) => {
     if (societyFilter !== 'all' && event.host_society !== societyFilter) return false;
     if (attendeeFilter === 'me') {
       if (!myId || !(event.attendee_ids || []).includes(myId)) return false;
@@ -349,25 +523,51 @@ const EventManagementPage = () => {
       if (!(event.attendee_ids || []).includes(attendeeFilter)) return false;
     }
     return true;
-  });
+  };
 
-  // Upcoming 하이라이트: 내가 attendee_ids 포함된 미래 가장 가까운 1건.
-  // master = 전체 미래 1건 · 내 참석 0건이면 전체 다음 1건 폴백.
-  const futureEvents = events.filter((e) => e.start_date && e.start_date > today);
+  // 기간 필터 — 종료 영역에만 적용. 올해=event_year(폴백 start_date 연도), 반기=start_date 월.
+  const matchDate = (event) => {
+    if (dateFilter === 'all') return true;
+    if (dateFilter === 'year') {
+      const y = event.event_year || (event.start_date ? Number(event.start_date.slice(0, 4)) : null);
+      return y === currentYear;
+    }
+    const month = event.start_date ? Number(event.start_date.slice(5, 7)) : null;
+    if (dateFilter === 'h1') return month != null && month <= 6;
+    if (dateFilter === 'h2') return month != null && month > 6;
+    return true;
+  };
+
+  // 상단 = 진행 중·예정, start_date 오름차순, 기간 무관 전부(연도 무관 세이프가드).
+  const topEvents = events
+    .filter((e) => !isEnded(e.start_date, e.end_date))
+    .filter(matchShared)
+    .sort((a, b) => ((a.start_date || '') < (b.start_date || '') ? -1 : 1));
+
+  // 종료 = 하단 접힘. 기간·공통 필터 적용 후 최근 종료순(end_date 내림차순).
+  const endedEventsAll = events.filter((e) => isEnded(e.start_date, e.end_date));
+  const endedEvents = endedEventsAll
+    .filter(matchShared)
+    .filter(matchDate)
+    .sort((a, b) => ((a.end_date || '') > (b.end_date || '') ? -1 : 1));
+
+  // Upcoming 하이라이트: 상단(진행 중·예정) 중 미래 가장 가까운 1건.
+  // master = 전체 미래 1건 · 내 참석 0건이면 전체 다음 1건 폴백. 상단 영역에만.
+  const futureTop = topEvents.filter((e) => e.start_date && e.start_date > today);
   let upcomingId = null;
-  if (futureEvents.length) {
+  if (futureTop.length) {
     if (isMaster) {
-      upcomingId = futureEvents[0].id;
+      upcomingId = futureTop[0].id;
     } else {
-      const mine = myId ? futureEvents.find((e) => (e.attendee_ids || []).includes(myId)) : null;
-      upcomingId = (mine || futureEvents[0]).id;
+      const mine = myId ? futureTop.find((e) => (e.attendee_ids || []).includes(myId)) : null;
+      upcomingId = (mine || futureTop[0]).id;
     }
   }
 
   const distinctSocieties = [...new Set(events.map((e) => e.host_society).filter(Boolean))];
 
   const activeFilterCount =
-    (dateFilter !== 'year' ? 1 : 0) + (societyFilter !== 'all' ? 1 : 0) + (attendeeFilter !== 'all' ? 1 : 0);
+    (dateFilter !== 'all' ? 1 : 0) + (societyFilter !== 'all' ? 1 : 0) + (attendeeFilter !== 'all' ? 1 : 0);
 
   const headerAction = (
     <Box sx={{ display: 'flex', gap: 1 }}>
@@ -385,24 +585,27 @@ const EventManagementPage = () => {
   );
 
   const DATE_TOGGLES = [
-    { key: 'year', label: `올해(${new Date().getFullYear()})` },
+    { key: 'all', label: '전체' },
+    { key: 'year', label: `올해(${currentYear})` },
     { key: 'h1', label: '상반기' },
     { key: 'h2', label: '하반기' },
   ];
 
-  const resetFilters = () => { setDateFilter('year'); setSocietyFilter('all'); setAttendeeFilter('all'); };
+  const resetFilters = () => { setDateFilter('all'); setSocietyFilter('all'); setAttendeeFilter('all'); };
+
+  const rowHandlers = { staffMap, myId, onOpenMenu: openMenu, onRowClick: handleRowClick };
 
   return (
     <Box>
       <PageHeader
         title="학회"
-        subtitle={`${new Date().getFullYear()}년 학회 ${filteredEvents.length}건 · 운영 대상 한눈에`}
+        subtitle={`진행·예정 ${topEvents.length}건 · 종료 ${endedEvents.length}건 · 운영 대상 한눈에`}
         icon={EventNoteIcon}
         action={headerAction}
       />
 
       {/* 필터바 */}
-      <SectionCard sx={{ mb: 2 }} padding={20}>
+      <SectionCard sx={{ mb: 3 }} padding={20}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
           <FilterListIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
           <Typography variant="subtitle2" sx={{ color: 'text.primary' }}>필터</Typography>
@@ -415,8 +618,8 @@ const EventManagementPage = () => {
           )}
         </Box>
 
-        {/* Row 1 — 기간 토글 */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5, flexWrap: 'wrap' }}>
+        {/* Row 1 — 기간 토글 (종료 영역에만 적용) */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.75, flexWrap: 'wrap' }}>
           <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 700, mr: 0.5 }}>기간</Typography>
           {DATE_TOGGLES.map(({ key, label }) => (
             <Chip
@@ -430,6 +633,9 @@ const EventManagementPage = () => {
             />
           ))}
         </Box>
+        <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block', mb: 1.5 }}>
+          기간은 종료 학회에만 적용돼요. 진행 중·예정 학회는 연도와 무관하게 항상 모두 표시됩니다.
+        </Typography>
 
         {/* Row 2 — 학회명 + 참석자 + "나" 칩 */}
         <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -468,7 +674,7 @@ const EventManagementPage = () => {
         </Box>
       </SectionCard>
 
-      {/* 목록 */}
+      {/* 상단: 진행 중·예정 */}
       {loading ? (
         <SectionCard padding={0}>
           <TableContainer>
@@ -479,12 +685,12 @@ const EventManagementPage = () => {
             </Table>
           </TableContainer>
         </SectionCard>
-      ) : filteredEvents.length === 0 ? (
+      ) : topEvents.length === 0 ? (
         <SectionCard padding={20}>
           <EmptyState
             icon={EventNoteIcon}
-            title="해당 조건의 학회가 없어요"
-            description="필터를 해제하거나 새 학회를 추가하세요"
+            title="진행 중·예정 학회가 없어요"
+            description={activeFilterCount > 0 ? '학회명·참석자 필터를 해제하거나 새 학회를 추가하세요' : '새 학회를 추가하세요'}
             action={
               activeFilterCount > 0
                 ? { label: '필터 해제', onClick: resetFilters }
@@ -495,191 +701,66 @@ const EventManagementPage = () => {
           />
         </SectionCard>
       ) : isMobile ? (
-        // ─── 모바일 카드 ───
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          {filteredEvents.map((event) => {
-            const st = getEventStatusKST(event.start_date, event.end_date);
-            const ended = st.label === '종료';
-            const isUpcoming = event.id === upcomingId;
-            return (
-              <Box
-                key={event.id}
-                onClick={() => handleRowClick(event)}
-                sx={{
-                  bgcolor: ended ? theme.gray[50] : 'background.paper',
-                  border: `1px solid ${isUpcoming ? alpha(theme.palette.primary.main, 0.3) : theme.gray[200]}`,
-                  borderLeft: isUpcoming ? `3px solid ${theme.palette.primary.main}` : `1px solid ${theme.gray[200]}`,
-                  borderRadius: `${theme.radii.lg}px`,
-                  p: 2,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 1.25,
-                  cursor: 'pointer',
-                  transition: `all 0.2s ${theme.easing.toss}`,
-                  '&:hover': { borderColor: theme.gray[300] },
-                }}
-              >
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <EventStateBadge startDate={event.start_date} endDate={event.end_date} />
-                  <DiscountChip rate={event.discount_rate} />
-                  <Box sx={{ ml: 'auto' }}>
-                    <IconButton
-                      size="small"
-                      onClick={(e) => { e.stopPropagation(); openMenu(e.currentTarget, event); }}
-                      sx={{ color: 'text.secondary' }}
-                      aria-label="행 메뉴 열기"
-                    >
-                      <MoreVertIcon sx={{ fontSize: 20 }} />
-                    </IconButton>
-                  </Box>
-                </Box>
-
-                <Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                    {isUpcoming && <StarBorderIcon sx={{ fontSize: 16, color: 'primary.main' }} />}
-                    <Typography variant="subtitle1" sx={{ color: ended ? 'text.secondary' : 'text.primary', lineHeight: 1.3 }}>
-                      {event.host_society || event.name}
-                    </Typography>
-                  </Box>
-                  <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.25 }}>
-                    {event.event_season}
-                  </Typography>
-                </Box>
-
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                    <EventNoteIcon sx={{ fontSize: 15, color: 'text.disabled', flexShrink: 0 }} />
-                    <Typography variant="body2" sx={{ color: 'text.secondary', fontFeatureSettings: '"tnum" 1' }}>
-                      {dot(event.start_date)}
-                      {event.end_date && event.end_date !== event.start_date ? ` ~ ${dot(event.end_date)}` : ''}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                    <PlaceIcon sx={{ fontSize: 15, color: 'text.disabled', flexShrink: 0 }} />
-                    <Typography variant="body2" sx={{ color: 'text.secondary' }}>{event.venue || '—'}</Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.75 }}>
-                    <PersonIcon sx={{ fontSize: 15, color: 'text.disabled', flexShrink: 0, mt: 0.25 }} />
-                    <AttendeeCell ids={event.attendee_ids} staffMap={staffMap} myId={myId} />
-                  </Box>
-                </Box>
-              </Box>
-            );
-          })}
+          {topEvents.map((event) => (
+            <EventMobileCard key={event.id} event={event} isUpcoming={event.id === upcomingId} {...rowHandlers} />
+          ))}
         </Box>
       ) : (
-        // ─── 데스크톱/태블릿 표 ───
         <SectionCard padding={0}>
-          <TableContainer>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>#</TableCell>
-                  <TableCell>학회명</TableCell>
-                  <TableCell>행사명</TableCell>
-                  <TableCell>날짜</TableCell>
-                  <TableCell>장소</TableCell>
-                  <TableCell>참석자</TableCell>
-                  <TableCell align="right" sx={{ width: 56 }} />
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filteredEvents.map((event, i) => {
-                  const st = getEventStatusKST(event.start_date, event.end_date);
-                  const ended = st.label === '종료';
-                  const isUpcoming = event.id === upcomingId;
-                  return (
-                    <TableRow
-                      key={event.id}
-                      hover
-                      onClick={() => handleRowClick(event)}
-                      sx={{
-                        cursor: 'pointer',
-                        bgcolor: isUpcoming
-                          ? alpha(theme.palette.primary.main, 0.04)
-                          : ended
-                          ? theme.gray[50]
-                          : 'transparent',
-                        boxShadow: isUpcoming ? `inset 3px 0 0 ${theme.palette.primary.main}` : 'none',
-                        '& td': ended ? { color: 'text.secondary' } : undefined,
-                        '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.02) },
-                        transition: `background-color 0.15s ${theme.easing.toss}`,
-                      }}
-                    >
-                      <TableCell sx={{ width: 56 }}>
-                        <Typography variant="body2" sx={{ color: 'text.disabled', fontWeight: 500, fontFeatureSettings: '"tnum" 1' }}>
-                          {i + 1}
-                        </Typography>
-                      </TableCell>
-
-                      <TableCell sx={{ minWidth: 160 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          {isUpcoming && (
-                            <Tooltip title="내 참석 다음 학회" arrow placement="top">
-                              <StarBorderIcon sx={{ fontSize: 16, color: 'primary.main', flexShrink: 0 }} />
-                            </Tooltip>
-                          )}
-                          <Typography variant="body2" sx={{ fontWeight: 700, color: ended ? 'text.secondary' : 'text.primary' }}>
-                            {event.host_society || event.name}
-                          </Typography>
-                        </Box>
-                        <Box sx={{ mt: 0.5 }}>
-                          <EventStateBadge startDate={event.start_date} endDate={event.end_date} />
-                        </Box>
-                      </TableCell>
-
-                      <TableCell sx={{ minWidth: 180 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                          <Typography variant="body2" sx={{ fontWeight: 500 }}>{event.event_season}</Typography>
-                          <DiscountChip rate={event.discount_rate} />
-                        </Box>
-                      </TableCell>
-
-                      <TableCell sx={{ minWidth: 120 }}>
-                        <Typography variant="body2" sx={{ fontWeight: 500, fontFeatureSettings: '"tnum" 1' }}>
-                          {dot(event.start_date)}
-                        </Typography>
-                        {event.end_date && event.end_date !== event.start_date && (
-                          <Typography variant="caption" sx={{ color: 'text.secondary', fontFeatureSettings: '"tnum" 1' }}>
-                            ~ {dot(event.end_date)}
-                          </Typography>
-                        )}
-                      </TableCell>
-
-                      <TableCell sx={{ minWidth: 140 }}>
-                        {event.venue ? (
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <PlaceIcon sx={{ fontSize: 15, color: 'text.disabled', flexShrink: 0 }} />
-                            <Typography variant="body2" sx={{ color: ended ? 'text.secondary' : 'text.primary' }}>
-                              {event.venue}
-                            </Typography>
-                          </Box>
-                        ) : (
-                          <Typography variant="body2" sx={{ color: 'text.disabled' }}>—</Typography>
-                        )}
-                      </TableCell>
-
-                      <TableCell sx={{ minWidth: 150 }}>
-                        <AttendeeCell ids={event.attendee_ids} staffMap={staffMap} myId={myId} />
-                      </TableCell>
-
-                      <TableCell align="right" sx={{ width: 56 }}>
-                        <IconButton
-                          size="small"
-                          onClick={(e) => { e.stopPropagation(); openMenu(e.currentTarget, event); }}
-                          sx={{ color: 'text.secondary', '&:hover': { bgcolor: theme.gray[100], color: 'text.primary' } }}
-                          aria-label="행 메뉴 열기"
-                        >
-                          <MoreVertIcon sx={{ fontSize: 20 }} />
-                        </IconButton>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </TableContainer>
+          <EventTable events={topEvents} upcomingId={upcomingId} {...rowHandlers} />
         </SectionCard>
+      )}
+
+      {/* 하단: 종료 접힘 영역 — 종료 학회가 하나라도 있을 때만 */}
+      {!loading && endedEventsAll.length > 0 && (
+        <Box sx={{ mt: 3 }}>
+          <Box
+            role="button"
+            tabIndex={0}
+            onClick={() => setEndedOpen((v) => !v)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEndedOpen((v) => !v); } }}
+            sx={{
+              display: 'flex', alignItems: 'center', gap: 1.5, px: 2, minHeight: 56,
+              bgcolor: 'background.paper', border: `1px solid ${theme.gray[200]}`,
+              borderRadius: endedOpen ? `${theme.radii.lg}px ${theme.radii.lg}px 0 0` : `${theme.radii.lg}px`,
+              cursor: 'pointer', transition: `background-color 0.15s ${theme.easing.toss}`,
+              '&:hover': { bgcolor: theme.gray[50] },
+              '&:focus-visible': { outline: 'none', boxShadow: theme.customShadows.focus },
+            }}
+          >
+            <Box sx={{ width: 32, height: 32, borderRadius: `${theme.radii.sm}px`, bgcolor: theme.gray[50], display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <HistoryIcon sx={{ fontSize: 18, color: theme.gray[600] }} />
+            </Box>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography variant="subtitle2" sx={{ color: 'text.primary' }}>
+                종료된 학회 <Box component="span" sx={{ fontFeatureSettings: '"tnum" 1' }}>{endedEvents.length}</Box>건
+              </Typography>
+              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+                {endedOpen ? '최근 종료순' : '펼쳐서 지난 학회 보기'}
+              </Typography>
+            </Box>
+            {endedOpen ? <ExpandLessIcon sx={{ color: 'text.secondary' }} /> : <ExpandMoreIcon sx={{ color: 'text.secondary' }} />}
+          </Box>
+
+          {endedOpen && (
+            endedEvents.length === 0 ? (
+              <Box sx={{ border: `1px solid ${theme.gray[200]}`, borderTop: 'none', borderRadius: `0 0 ${theme.radii.lg}px ${theme.radii.lg}px`, overflow: 'hidden' }}>
+                <EmptyState icon={HistoryIcon} title="해당 조건의 종료 학회가 없어요" description="기간·학회명·참석자 필터를 조정해 보세요" sx={{ py: 4 }} />
+              </Box>
+            ) : isMobile ? (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mt: 1.5 }}>
+                {endedEvents.map((event) => (
+                  <EventMobileCard key={event.id} event={event} isUpcoming={false} {...rowHandlers} />
+                ))}
+              </Box>
+            ) : (
+              <Box sx={{ border: `1px solid ${theme.gray[200]}`, borderTop: 'none', borderRadius: `0 0 ${theme.radii.lg}px ${theme.radii.lg}px`, overflow: 'hidden' }}>
+                <EventTable events={endedEvents} upcomingId={null} {...rowHandlers} />
+              </Box>
+            )
+          )}
+        </Box>
       )}
 
       {/* ⋯ 행 액션 메뉴 */}
@@ -754,36 +835,15 @@ const EventManagementPage = () => {
         onUpdated={fetchEvents}
       />
 
-      {/* QR 다이얼로그 */}
-      <Dialog open={qrDialogOpen} onClose={() => setQrDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>QR 코드</DialogTitle>
-        <DialogContent>
-          <Box
-            sx={{
-              display: 'flex',
-              justifyContent: 'center',
-              mb: 2,
-              '& svg': { maxWidth: '100%', height: 'auto' },
-            }}
-            dangerouslySetInnerHTML={{ __html: qrSvg }}
-          />
-          {qrDialogEvent && (
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{qrDialogEvent.name}</Typography>
-              <Typography
-                variant="body2"
-                sx={{ color: 'text.secondary', mt: 0.5 }}
-              >
-                {`${window.location.origin}/order?events=${qrDialogEvent.order_url_slug}`}
-              </Typography>
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions sx={{ p: 2 }}>
-          <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleDownloadQrSvg}>SVG 다운로드</Button>
-          <Button onClick={() => setQrDialogOpen(false)}>닫기</Button>
-        </DialogActions>
-      </Dialog>
+      {/* QR 다이얼로그 (목록·상세 공용) */}
+      <EventQrDialog
+        open={qrOpen}
+        name={qrEvent?.name}
+        url={qrEvent ? buildOrderUrl(qrEvent.order_url_slug) : ''}
+        qrSvg={qrSvg}
+        onClose={() => setQrOpen(false)}
+        onDownload={handleDownloadQr}
+      />
     </Box>
   );
 };
