@@ -31,3 +31,13 @@ supabase/functions/.debug/
 DOCS/PROJECT_INTRO_VIBE_PM.md
 MANUAL.md
 DOCS/
+backup_*.sql
+
+# 로컬 도구·스킬 설치 부산물
+.agents/
+.claude/skills/
+skills-lock.json
+/deno.lock
+
+# 루트의 업무용 엑셀(상품 업로드 양식 개선안 등) — 앱 템플릿은 public/templates/ 에 별도 추적
+/*.xlsx

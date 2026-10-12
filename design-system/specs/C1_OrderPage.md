@@ -3,7 +3,11 @@
 > 이 시트는 고객 주문서 화면의 정보·기능·데이터 구조의 단일 진실 소스다.
 > 시안과 실서비스 구현은 이 시트의 모든 항목을 1:1로 반영해야 한다.
 > 임의 단순화·통합·생략은 건우님의 명시적 승인 후 이 시트를 먼저 갱신한 다음에만 허용된다.
-> 마지막 갱신: 2026-07-02 **검색 타이핑 렉 해결 + 검색 대상 단순화(4→1)**(frontend-engineer, 건우님 실동작 피드백). ①타이핑 렉 근본 해결 — 검색 input을 별도 `ProductSearchBar.jsx`로 분리(자체 `useState` + 내부 `useDebouncedValue` 250ms). input 값은 컴포넌트 내부에서만 갱신되고 **debounce된 값만** `onSearch`로 상위(`ProductSelectionStep`)에 올림. 기존엔 `searchTerm`이 상위 controlled state라 매 키입력(IME 조합 포함)마다 `ProductSelectionStep`+검사군 트리(MUI Card/Collapse 다수) 전체가 리렌더돼 자모 입력이 "가→가나다" 뭉텅이로 지연됐음. 이제 입력은 input만, 트리는 디바운스 후 1회만 갱신 → 조합 방해 제거. 상위엔 `useDebouncedValue`·`searchTerm` state·`TextField`·`InputAdornment`·`SearchIcon` import 제거, `debouncedSearch`는 SearchBar가 세팅하는 순수 state로 축소. ②검색 대상 = **상품명 원본(`name`) 단일**(4필드 폐지). 기존 검사명·약어·`option_name`·`option_label` 4필드 매칭을 `options.some(p => matchesSearch(p.name, ...))` 하나로 교체. 근거(건우님 통찰): 원본 상품명에 검사명·약어·말머리·옵션이 모두 포함(예 `K·BASC-3 한국판 정서-행동 평가시스템 부모보고형-청소년용_검사지/온라인코드(20)`) → name 단일로 정확도 유지+단순화. 검사군 단위 노출(옵션 하나라도 매칭이면 그 검사군 노출)·자동 펼침·접기 토글 자유 로직은 그대로. ③`TestGroupCard`를 `React.memo`로 감쌈 — 검색어 변경 시 매칭 안 된 카드의 불필요 재렌더 skip. memo 유효화를 위해 `onToggle`이 `(id, expanded)`를 받도록 시그니처 변경(부모가 인라인 화살표 대신 안정 콜백 `toggleGroup` 직접 전달), `onAdd`/`onIncrement`/`onDecrement`/`getCartQuantity`는 기존 `useCallback`(cart 의존)이라 검색어 변경엔 안정. order_items 불변(옵션=개별 product, cart 무변경). testGroupDisplay 그룹핑 무변경(테스트 10 유지). 검증: lint 0(변경 3파일)·build·vitest 113 passed.
+> 마지막 갱신: 2026-08-25 **연락처 제출 가드 + 장바구니 sessionStorage 보존**(frontend-engineer, QA 후속). (1) **연락처 유효성 하드 차단** — 판정을 순수 함수 `isValidMobile`(`utils/formatPhone.js`, `normalizePhone` 후 `01`로 시작하는 10~11자리)로 분리(단위 테스트 8). 하드 차단은 **Step 1→2 진입 게이트 한 곳**(`OrderPage.handleNext` activeStep===1) — 미완성·지역번호(02)·과거 검수용 난수("123")로 제출되면 접수 확인 알림톡이 유실되므로 차단 + 안내 "휴대폰 번호를 확인해주세요. 접수 확인 알림톡이 이 번호로 발송됩니다.". `CustomerInfoStep` 연락처 필드는 **blur 후에만** 같은 검사로 인라인 error/헬퍼 표시(입력 중 방해 없음, 막지 않음 — 안내만). `isCustomerInfoValid`(버튼 활성)는 phone truthy 그대로 유지(버튼은 눌리되 게이트가 친절히 차단, 침묵 disabled 방지). 어드민 경로(NewOrderModal 등) 미변경. (2) **진행 내용 sessionStorage 보존**(`utils/orderDraft.js`, 단위 테스트 8) — `cart`·`customerInfo`·`activeStep`을 **행사 slug별 키**(`inpsyt:orderDraft:{slug}`)로 저장, 마운트 시 lazy-init 복원(부스 회선 불안정 대비). **localStorage 금지**(공용 태블릿에서 다음 고객에게 이전 고객 연락처 유출 방지) — sessionStorage(탭 생명주기)라 복원은 **같은 탭 안에서만** 유효. cart 스냅샷은 **그대로 복원**(서버 create-order가 product_id로 금액 재계산 → 표시 스냅샷이 최신 상품과 달라도 실제 결제 금액 무영향, 재결합 fetch 생략 = 과잉설계 방어). 카트 비면 activeStep 0 강제(깨진 리뷰 화면 방지). 제출 성공(token navigate·success dialog close) 시 클리어. 파싱 실패·구버전 스키마(v≠1) 조용히 무시. 검증: build·lint 신규 0·formatPhone.test 20(신규 8)·orderDraft.test 8(신규).
+> 이전 갱신: 2026-08-18 **소분류 칩을 도구 단독 행사에만 노출 — 검사·도서 단독은 숨김**(frontend-engineer, 건우님 정정). 단일 대분류 행사(`visible_categories.length===1`)의 카테고리 칩 노출을 **대분류별 화이트리스트**로 결정한다. 판정은 순수 함수 `shouldShowCategoryChips(visibleCategories)`(`utils/testGroupDisplay.js`, `SUBCATEGORY_CHIP_CATEGORIES = ['도구']`) — 컴포넌트는 `showCategoryChips = shouldShowCategoryChips(visibleCategories)`. **도구만 노출**(소분류 3종 인지 29·언어 24·사회성 22, 총 75상품이라 칩이 짧고 실제로 잘 좁혀짐), **검사(17종·자식명 김)·도서(13종, 심리학 하나가 1,543개)는 숨김**(칩 과다·안 좁혀짐, 검사명·도서명 검색이 주 탐색 경로). 2뎁스 추가는 기각. **인기·신상품(뷰모드) 칩과 검색바는 항상 유지**(숨기는 건 카테고리 칩만). 칩 숨김 시 칩 줄 컨테이너 자체를 조건부 렌더(빈 여백·깨진 간격 없음). 검사·도서 단독에서는 `selectedCategory`가 초기값 `'all'` 고정(칩이 없어 바꿀 수 없음) → 소분류 필터 자연 비활성, 전 상품 노출. **소분류 필터 로직·util(`productMatchesSubCategory`)·검사군 옵션 단위 매칭 분기는 그대로 유지** — 도구는 `test_group_id` 없는 평면 상품이라 소분류 필터 경로를 실제로 탄다. 이전의 "소분류 2종 미만이면 숨김"(`categories.length>=2`) 규칙은 화이트리스트로 대체. 비단일 대분류(일반 학회) 대분류 칩은 회귀 없이 기존대로 노출. **대분류별 노출 여부를 단위 테스트로 검증**(도구 노출 / 검사·도서 숨김 / 다중·NULL 노출). 검증: build·lint 신규 0·testGroupDisplay.test.js 26 passed(신규 4).
+> 이전 갱신: 2026-08-18 **배너 할인율 숫자 영구 제거 + 행별 할인 표기**(frontend-engineer, 프리뷰 QA 수정). (1) **헤더 부제의 `· N% 할인 적용` 숫자 표기를 오버라이드 유무와 무관하게 영구 삭제** — 조건부(`!hasOverrideProduct`)라 상품 로딩 전 잠깐 보였다가 사라지는 깜빡임 발생. 3스텝(ProductSelectionStep·CustomerInfoStep·OrderReviewStep) 모두 **행사명만** 남김. 죽은 코드(`hasOverrideProduct`·`hasOverrideItem`·`cart.some(...)`) 정리, `CustomerInfoStep`에서 이제 미사용인 `cart`·`discountRate` prop 제거(OrderPage 호출부도 정리). (2) **장바구니(CartBottomSheet)·주문확인(OrderReviewStep) 아이템 행에 할인 가시화** — `getEffectiveRate(item, discountRate) > 0`인 행만 정가 취소선(text.disabled) + 할인율 %(error.main·700) + 할인 단가; 무할인 행은 정가만(취소선·% 없음). 상품 카드(ProductCard/TestGroupCard)와 동일 시각 언어. 계산은 `utils/pricing.js` 유틸 사용(인라인 공식 금지). 검증: build·pricing.test 14·lint 신규 0.
+> 이전 갱신: 2026-08-18 **상품별 할인율 오버라이드 — 고객 화면 반영**(frontend-engineer). 할인 단가 계산을 공용 유틸 `utils/pricing.js`(`getEffectiveRate`/`getDiscountedUnit`)로 일원화 — `ProductCard`·`TestGroupCard`(OptionPrice)·`CartBottomSheet`·`CostSummary`·`OrderReviewStep` 5곳의 복붙 공식 교체. **실효율 = `discount_override ?? (is_discountable ? discountRate : 0)`, 단가 = `round(list_price*(1-실효율))`**(backend create-order와 등가 정본). override가 NULL/undefined면 순수 no-op(옛 공식과 48조합×3식 0 불일치 증명). 카드의 % 표시 텍스트도 `getEffectiveRate*100` 기준으로 통일(행사율 하드코딩 제거). **배너 조건부**: 개별 할인율 상품(`discount_override!=null`)이 하나라도 있으면 헤더 부제의 `· N% 할인 적용` **숫자를 빼고 행사명만** 남긴다(품목별 실효율이 달라 단일 숫자가 오해를 부름 — 정확한 율은 각 카드에 이미 표시). 판정은 컴포넌트 로컬 — `ProductSelectionStep`=`baseProducts.some(p=>p.discount_override!=null)`, `OrderReviewStep`/`CustomerInfoStep`=`cart.some(i=>i.discount_override!=null)`. **`CustomerInfoStep`은 기존 `cart` prop을 신규로 전달받음**(OrderPage 배관 — cart는 이미 보유, 파생 state 추가 없음). 서버(create-order)는 실효율 재계산을 이미 반영(backend 병렬 커밋 44e612a). **DB**: `products.discount_override`(numeric nullable). 검증: build·pricing.test 14 passed·lint 신규 0.
+> 이전 갱신: 2026-07-02 **검색 타이핑 렉 해결 + 검색 대상 단순화(4→1)**(frontend-engineer, 건우님 실동작 피드백). ①타이핑 렉 근본 해결 — 검색 input을 별도 `ProductSearchBar.jsx`로 분리(자체 `useState` + 내부 `useDebouncedValue` 250ms). input 값은 컴포넌트 내부에서만 갱신되고 **debounce된 값만** `onSearch`로 상위(`ProductSelectionStep`)에 올림. 기존엔 `searchTerm`이 상위 controlled state라 매 키입력(IME 조합 포함)마다 `ProductSelectionStep`+검사군 트리(MUI Card/Collapse 다수) 전체가 리렌더돼 자모 입력이 "가→가나다" 뭉텅이로 지연됐음. 이제 입력은 input만, 트리는 디바운스 후 1회만 갱신 → 조합 방해 제거. 상위엔 `useDebouncedValue`·`searchTerm` state·`TextField`·`InputAdornment`·`SearchIcon` import 제거, `debouncedSearch`는 SearchBar가 세팅하는 순수 state로 축소. ②검색 대상 = **상품명 원본(`name`) 단일**(4필드 폐지). 기존 검사명·약어·`option_name`·`option_label` 4필드 매칭을 `options.some(p => matchesSearch(p.name, ...))` 하나로 교체. 근거(건우님 통찰): 원본 상품명에 검사명·약어·말머리·옵션이 모두 포함(예 `K·BASC-3 한국판 정서-행동 평가시스템 부모보고형-청소년용_검사지/온라인코드(20)`) → name 단일로 정확도 유지+단순화. 검사군 단위 노출(옵션 하나라도 매칭이면 그 검사군 노출)·자동 펼침·접기 토글 자유 로직은 그대로. ③`TestGroupCard`를 `React.memo`로 감쌈 — 검색어 변경 시 매칭 안 된 카드의 불필요 재렌더 skip. memo 유효화를 위해 `onToggle`이 `(id, expanded)`를 받도록 시그니처 변경(부모가 인라인 화살표 대신 안정 콜백 `toggleGroup` 직접 전달), `onAdd`/`onIncrement`/`onDecrement`/`getCartQuantity`는 기존 `useCallback`(cart 의존)이라 검색어 변경엔 안정. order_items 불변(옵션=개별 product, cart 무변경). testGroupDisplay 그룹핑 무변경(테스트 10 유지). 검증: lint 0(변경 3파일)·build·vitest 113 passed.
 > 이전 갱신: 2026-07-02 **검사 위계 진열 UX 4건 수정**(frontend-engineer, 건우님 실동작 피드백). ①검색 속도 — `useDebouncedValue`(신규 훅, 250ms)로 검색어 디바운스. 입력은 즉시 반영(TextField value)·필터/검색 계산만 지연. 그룹핑(`testGroups`)은 `baseProducts` 기준 1회·검색어 비의존(재그룹핑 없음, 기존 유지). 매 키입력 리렌더 → 타이핑 멈춘 뒤 1회로 감소(필터연산 실측 1.58ms/회, 실병목=검사군 카드+옵션 트리 리렌더). ②말머리 검색 — 매칭에 `option_label` 추가(검사명·약어·`option_name`·`option_label`). "교사용"·"청소년" 등 말머리로 검사군 노출. ③접기/펼치기 자유 — 검색 자동 펼침을 **초기 상태로만**. `expandedGroups[id]===undefined`(미조작)면 검색 매칭 여부 따름·정의됐으면 사용자 값 우선. `toggleGroup(id, currentExpanded)`가 현재 표시 상태 반대로 토글(자동 펼침 카드도 즉시 접힘). 검색어 변경 시 사용자 조작 리셋. ④옵션1개 UX 통일(**시안 §(3) 번복**) — 옵션 수 무관 모든 검사군 동일 UX(접힘→펼침→옵션 세로 리스트→담기). `TestGroupCard`의 `isSingle` 분기·바로담기 카드·`OptionPrice variant='single'` 제거. order_items 불변(옵션=개별 product, cart 무변경). testGroupDisplay 로직 무변경(그룹핑은 옵션 수 비의존, 테스트 10 유지). 검증: lint 0(변경 파일)·build·vitest 113 passed.
 > 이전 갱신: 2026-07-02 **검사 위계 2뎁스 FE 구현**(frontend-engineer). 시안(아래 갱신)을 실 코드로 반영: `TestGroupCard.jsx`(신규, 3상태 카드) + `ProductSelectionStep.jsx`(검사군 리스트 ↔ 평면 그리드 분기) + `utils/testGroupDisplay.js`(그룹핑 순수 로직, 단위 테스트 10). 검사군 메타(약어·검사명·정렬)는 `fetchTestGroups()`(api/testGroups.js, graceful)로 마스터 조회 후 클라 병합 — `products` 단독엔 `test_group_id`만 있어 메타 조회 필요(GROUP BY RPC는 없음). `is_active=false` 상품·`test_groups.is_active=false` 검사군 고객 진열 제외. 검색=검사군 단위(검사명·약어·`option_name`) + 자동 펼침. graceful(컬럼 미적용 시 전부 평면). order_items 불변(옵션=개별 product, cart `{...product, quantity}`). 검증: lint 0·build·vitest 113 passed(신규 10).
 > 이전 갱신: 2026-07-02 **검사 위계 2뎁스 시안 확정 — `test_group_id` 방식**(product-designer). 폐기된 `parent_code`/클라파싱 절을 새 명세로 교체: 검사군 카드 3상태(접힘/펼침/옵션1개)를 DB 컬럼값(`test_groups.name`·`.abbr`, `products.option_label`·`option_name`·`is_common`·`sort_order`) 기반으로 재정의. 말머리=`[대괄호]` 폐지·소프트 회색 틴트 라벨(`gray[100]` 배경)·괄호수량 풀어쓰기(`(20)`→`20개`, 시드 단계 정제). 검사군 카드 가격 완전 은닉(최저가 앵커도 안 함, 룰 11·12). 옵션1개는 펼침 화살표 대신 우측 담기버튼으로 구분. 진열=`is_active=true` 옵션만. graceful(룰 14) 계승. §검사군 카드 절·핵심 발견 11~14 갱신.
@@ -33,6 +37,14 @@
 - [ ] `/go` 단축 진입 — `GoRedirect.jsx`가 활성 학회 슬러그(`active_event_slug`)를 받아 `/order?events={slug}`로 `window.location.replace`
 - [ ] 어드민 학회 관리 화면에서 운영자가 슬러그 URL을 복사·QR 생성해 고객에게 전달 — `EventManagementPage.jsx:257·263·478·777`
 - [ ] 알림톡 본문의 주문 상태 링크(`/order/status/{access_token}`)는 별개 화면 (이 시트의 범위 아님)
+
+## 진행 내용 임시 보존 (`utils/orderDraft.js`, 2026-08-25 신설)
+부스 회선이 불안정해 새로고침·탭 퇴출 시 `cart`·`customerInfo`·`activeStep`이 전량 유실되던 문제(QA) 대응.
+- [ ] **저장소 = sessionStorage 한정.** localStorage 금지 — 부스 공용 태블릿에서 다음 고객에게 이전 고객 연락처가 남으면 안 됨. sessionStorage는 탭 생명주기라 탭을 닫으면 비워짐. **복원은 같은 탭 안에서만 유효**(customerInfo 포함).
+- [ ] **키에 행사 slug 포함**(`inpsyt:orderDraft:{slug}`) — 행사별 격리. 다른 행사 주문서에 이전 카트가 새지 않음.
+- [ ] 저장 = `cart`·`customerInfo`·`activeStep` 변경 시 자동(useEffect). 복원 = 마운트 시 lazy-init(`loadOrderDraft(eventSlug)`).
+- [ ] **cart 스냅샷 그대로 복원**(product_id 재결합 fetch 생략) — 서버 `create-order`가 product_id로 금액을 재계산하므로 표시 스냅샷이 최신 상품 데이터와 달라도 실제 결제 금액엔 영향 없음(과잉설계 방어). 카트가 비면 `activeStep`은 0 강제(깨진 리뷰 화면 방지).
+- [ ] **제출 성공 시 클리어**(token navigate·success dialog close 양쪽). 파싱 실패·구버전 스키마(`v≠1`)는 조용히 무시하고 빈 상태로 시작.
 
 ## 부트 화면 — 앱 로드 전·로드 실패 (`index.html`, 2026-08-13 신설)
 React가 마운트되기 전까지 고객이 보는 유일한 화면. 외부 CSS·JS가 하나도 도착하지 않은 상태에서도 성립해야 하므로 인라인 마크업·인라인 스타일만 사용한다. `createRoot` 마운트 시 내용이 교체된다.
@@ -146,7 +158,7 @@ Windows 고대비를 켜면 OS가 우리 색을 시스템 팔레트로 강제 �
 
 #### 헤더 (line 152-162)
 - [ ] 페이지 제목 텍스트: "상품을 선택해주세요" — `variant="h3"`, `fontWeight: 800`
-- [ ] 부제(조건부, `eventName` 있을 때): "{이벤트명}" + `discountRate > 0`이면 " · {N}% 할인 적용" 접미사 — `variant="body2"`, `color: text.secondary`
+- [ ] 부제(조건부, `eventName` 있을 때): "{이벤트명}"만 — `variant="body2"`, `color: text.secondary`. **`· N% 할인 적용` 숫자 표기 영구 제거**(2026-08-18, 로딩 전 깜빡임 제거 — 할인 사실은 각 상품 카드/행에서 표기). 3스텝 헤더 부제 동일.
 
 #### 검색바 (`ProductSearchBar.jsx` — 2026-07-02 입력 격리 분리)
 - [ ] `TextField` 풀너비, 시작 아이콘 `SearchIcon`(text.disabled)
@@ -163,15 +175,17 @@ Windows 고대비를 켜면 OS가 우리 색을 시스템 팔레트로 강제 �
 - [ ] 선택 시 filled+primary, 비선택 시 outlined default. **라운드 `radii.sm`(8px) = 둥근 사각(알약형 아님). 2026-06-01 목업 정합**
 - [ ] 검색어가 있을 때는 뷰 모드 필터링 무시 (line 62-65)
 
-#### 카테고리 칩 (line 221-248)
-- [ ] 동적 목록 — `['검사', '도서']` + `allProducts`에서 추출한 `category`의 unique 합집합 (line 134-136) + 맨 앞 "전체"(`all`). **`도구`는 `검사`로 정규화 — 별도 칩 노출 안 함, `검사` 선택 시 도구도 포함 (2026-06-01 건우님 규칙)**
+#### 카테고리 칩 (`showCategoryChips` 조건부)
+- [ ] **단일 대분류 행사(`isSingleCategory`) 중 검사·도서 단독은 이 칩 줄 자체를 렌더하지 않는다. 도구 단독은 소분류 칩을 노출한다**(화이트리스트 `SUBCATEGORY_CHIP_CATEGORIES`)(`showCategoryChips = shouldShowCategoryChips(visibleCategories)`, 2026-08-18). 검색이 주 탐색 경로. 인기·신상품 뷰모드 칩과 검색바는 유지.
+- [ ] 다중 대분류(일반 학회): 동적 목록 — `['검사', '도서']` + `baseProducts`에서 추출한 `category`의 unique 합집합 + 맨 앞 "전체"(`all`). **`도구`는 `검사`로 정규화 — 별도 칩 노출 안 함, `검사` 선택 시 도구도 포함 (2026-06-01 건우님 규칙)**
 - [ ] 선택 시 filled+secondary, 비선택 시 outlined default. **라운드 `radii.sm`(8px) — 뷰 모드 칩과 동일(2026-06-01 목업 정합)**
 
 > **(구현 완료 — 2026-06-25, 행사별 판매 대분류 필터):** 행사가 "도구"만 파는 경우(오티즘 엑스포), 대분류 "도구" 칩을 숨기고 **그 하위 소분류 칩(인지/언어/상담 등, `products.sub_category` 기준)** 으로 탐색하게 한다.
 > - **노출 필터(1차)**: `eventInfo.visible_categories`(events 신규 text[] 컬럼)가 값 있으면 **원본 `product.category`**(검사/도서/도구) ∈ visible_categories 인 상품만 노출(`baseProducts`, `ProductSelectionStep.jsx`). ⚠️ 매칭은 **원본 category** 기준 — 도구→검사 정규화는 칩 표시 전용이라 필터에 미적용. NULL 또는 빈 배열 → 전체 노출(기존 행사 보존). 기존 `eventTags`(tags) 필터와 AND 공존.
-> - 대분류 "도구" 상위 칩은 **숨김** — 행사가 단일 대분류만 팔면(`visible_categories.length === 1`) 대분류 칩 자체가 무의미(전부 같은 대분류).
+> - **(2026-08-18 변경) 단일 대분류 행사(`visible_categories.length === 1`) 중 **검사·도서**는 카테고리 칩 줄 전체를 숨기고, **도구는 소분류 칩을 노출한다**** — 대분류 칩(전부 같은 대분류라 무의미)뿐 아니라 아래 소분류 칩도 숨김. `showCategoryChips = shouldShowCategoryChips(visibleCategories)`. 검색이 주 탐색 경로라 카테고리 칩 없이도 충분(건우님 결정). **단, 도구 단독 행사는 예외로 소분류 칩을 노출한다**(소분류 3종뿐이라 칩이 짧고 실제로 좁혀지며, 75상품을 분류 없이 나열하면 오히려 불편). 검사·도서 단독만 숨김.
 > - **(2026-06-29 추가) 상품 카드 상위 카테고리 칩도 숨김**: 단일 대분류 행사(`isSingleCategory`)에서는 `ProductCard`에 `hideCategoryBadge={true}`를 넘겨 카드 상단 카테고리 배지(§아래 ProductCard 카테고리 배지, `도구`→`검사` 표기 포함)를 **렌더하지 않음**. 전부 같은 대분류라 칩 반복이 무의미하고, `도구`→`검사` 표기가 고객에게 혼란. **강조 배지(인기/신규/동적)·상품명·가격은 영향 없음.** `도구`→`검사` 정규화 로직 자체는 다른 행사용으로 유지(단일 대분류일 때만 칩 숨김). 다른 행사(visible_categories 없음/NULL/복수 대분류)는 기존대로 카드 카테고리 칩 표시(회귀 0). 건우님 결정.
-> - 단일 대분류 행사 카테고리 칩 = **`baseProducts`에서 추출한 `sub_category` 목록**(localeCompare 정렬) + "전체" + (미지정 상품 있으면 "기타"). 소분류 칩 클릭 시 `sub_category` 일치 필터(미지정은 "기타"로 매칭). **소분류 2종 미만이면 칩 줄 자체 숨김**(탐색 무의미).
+> - ~~단일 대분류 행사 카테고리 칩 = `baseProducts`에서 추출한 `sub_category` 목록~~ **(2026-08-18 칩 숨김으로 대체 — 위 항목 참조).** 소분류 칩은 **도구 단독 행사에서만** 렌더하며(검사·도서는 숨김), **소분류 필터 로직·util(`productMatchesSubCategory`)·테스트는 유지**한다(향후 칩 복원·도서 전용 행사 대비). `selectedCategory`가 `'all'` 고정이라 필터는 자연 비활성. 아래 버그 픽스 절의 검사군 소분류 매칭 로직도 코드상 그대로 남아 있다.
+>   - **(2026-08-18 버그 픽스) 소분류 필터는 평면 상품과 검사군(2뎁스 카드) 양쪽에 걸린다.** 검사군은 **옵션 중 하나라도** 소분류가 일치하면 노출(`categoryFilteredGroups = testGroups.filter(g => g.options.some(p => productMatchesSubCategory(p, sub)))`). 폴백 규칙(`미지정 → '기타'`)은 평면과 동일 소스(`productMatchesSubCategory`, `utils/testGroupDisplay.js`). 카테고리 필터는 검색·뷰모드와 무관하게 항상 적용(평면 쪽과 동일). **회귀 배경**: 검사 상품이 전부 `test_group_id`로 검사군에 묶인 행사(예 kpa-2026-fall, 검사 1,126개 전량 검사군)에서 이전엔 필터가 평면(0건)에만 걸려 검사군이 전량 무반응이었음. 낡은 `showTestGroups` 게이트(단일 대분류 시 항상 `testGroups.length > 0`)는 제거하고 판정을 `categoryFilteredGroups`로 일원화.
 > - 여러 대분류를 함께 파는 행사·NULL·빈 배열이면 **기존 대분류 칩**(검사/도서, 도구→검사 정규화) 그대로 노출.
 > - 칩 시각(`radii.sm`·filled secondary)은 기존 패턴 유지. 소분류 색 칩 미적용(AI 시그니처 컬러 인디케이터 금지).
 > - **저장 위치 확정**: A5 판매 대분류 = `events.visible_categories` 신규 text[] 컬럼(tags 겸용 기각, `20260624000000_DRAFT` 마이그레이션). graceful: 컬럼/GRANT 미적용 환경에서는 OrderPage가 `visible_categories` 뺀 레거시 select로 fallback → 전체 노출 유지.
@@ -186,15 +200,16 @@ Windows 고대비를 켜면 OS가 우리 색을 시스템 팔레트로 강제 �
   - 표시명은 클라 파싱(`parseProductName`): groupName = name 마지막 `_{옵션}` 앞부분, optionName = `_` 뒤부분. 파싱 실패(`_` 없음) 시 풀네임 fallback.
 - [ ] CSS Grid(도서), `gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))'`, gap 1.5
 - [ ] 페이지네이션: **도서 그리드에만** 40개씩 무한 스크롤(`IntersectionObserver`, `PAGE_SIZE=40`). 검사군(340)은 페이지네이션 없이 전량 — 평균 3.3옵션·340군이라 리스트 가벼움.
-- [ ] 정렬 규칙: 인기 상품 우선(`is_popular`) → 이름 오름차순(`localeCompare`). 검사군 내부 옵션도 동일 정렬.
-- [ ] 필터 조합: 학회 태그(`eventTags`) ∩ 카테고리 ∩ 뷰 모드(인기/신규/전체) ∩ 검색
-  - 검색 중에는 학회 태그·뷰 모드 무시
+- [ ] 정렬 규칙: **학회 태그 매칭 우선(`eventTags`) → 인기 상품(`is_popular`) → 이름 오름차순(`localeCompare`)**. 검사군 카드도 동일(태그 매칭=옵션 중 하나라도 매칭) → `sort_order` → 검사명. 검사군 내부 옵션 정렬은 `sort_order`→이름 유지. **`eventTags` 비면 태그 키가 전부 0 → 기존 정렬과 동일(graceful).** 태그 매칭 판정은 `productMatchesEventTags`(`utils/testGroupDisplay.js`) 단일 함수 재사용(평면·검사군 공통).
+- [ ] **학회 태그는 '필터' 아니라 '정렬'(2026-08-18 변경, 건우님 결정)**: 태그 없는 상품도 숨기지 않고 아래로 내림. 근거 = `events.host_society`(주최 학회명) ↔ `products.tags` 문자열 정확 일치(별도 태그 UI 불필요). `eventTags` = `events.tags` ∪ `host_society`(중복·빈값 제거) → 지금은 tags가 전부 비어도 host_society로 동작, 향후 tags 병행 가능.
+- [ ] 필터 조합: 카테고리 ∩ 뷰 모드(인기/신규/전체) ∩ 검색 (~~학회 태그 필터~~ 폐기 — 정렬로 일원화)
+  - 검색 중에는 뷰 모드·태그 우선순위 무시(검색 결과 우선)
   - **검색 = 검사군 단위**: ①groupName 1차 매칭 → ②실패 시 옵션명(optionName) fallback. fallback 매칭 검사군은 펼친 상태로 노출. 옵션 낱개 결과는 쏟아내지 않음. 도서는 상품명 직접 매칭. 매칭 옵션 별색 하이라이트 안 함(룰 E).
 
 #### 검사군 카드 (`TestGroupCard.jsx` — 2026-07-02 FE 구현 완료)
 > **방식 확정(2026-07-02, product-designer 시안 → FE 구현 → UX 수정):** `test_group_id` 기반. 2뎁스 인라인 아코디언. 바텀시트·상세진입 기각(맥락 끊김·CartBottomSheet 중첩 방지). **옵션 수와 무관하게 모든 검사군이 동일 UX**(접힘→펼침→옵션 세로 리스트→담기). ~~옵션1개 특별 분기(3상태)~~ 는 **2026-07-02 번복**(건우님 실동작 피드백 — 옵션 수에 따라 UX가 갈리면 오히려 혼란, 일관된 펼침이 나음). 옵션1개 검사군도 "옵션 1개" + 펼침 화살표 → 펼치면 옵션 행(담기).
 > **데이터 소스 = DB 컬럼값**(클라 파싱 아님): 검사명·약어 = `test_groups.name`/`.abbr`(마스터 `fetchTestGroups()`로 조회 후 클라 병합), 옵션 행 = 소속 `products`의 `option_label`(말머리)·`option_name`(형태명)·`list_price`·`is_common`·`sort_order`. 옵션 정렬 = `sort_order`(NULL 폴백 원본순) → 이름. 진열 = `is_active=true`인 옵션만(숨김 옵션 미노출) + `test_groups.is_active=true` 검사군만. 검사군에 노출 옵션 0개면 카드 미표시.
-> **구현 메모:** 배지·스테퍼는 `ProductCard`의 `BadgeBox`(export)·스테퍼 패턴 재사용(시각 통일). 옵션 행 가격 `subtitle1`/800, 옵션1개 카드 가격 `subtitle1`/800 + fontSize 1.125rem(목업 `.single-price` 정합). 펼침 영역 `maxHeight 320 + overflowY auto`(다옵션 대응). 그룹핑·정렬은 `utils/testGroupDisplay.js` 순수 함수(단위 테스트 10).
+> **구현 메모:** 배지·스테퍼는 `ProductCard`의 `BadgeBox`(export)·스테퍼 패턴 재사용(시각 통일). 옵션 행 가격 `subtitle1`/800, 옵션1개 카드 가격 `subtitle1`/800 + fontSize 1.125rem(목업 `.single-price` 정합). 펼침 영역 `maxHeight 320 + overflowY auto`(다옵션 대응). 그룹핑·정렬은 `utils/testGroupDisplay.js` 순수 함수(단위 테스트 16 — 학회 태그 우선 정렬·`productMatchesEventTags` 포함).
 
 > **상태 = 접힘 / 펼침 2상태(옵션 수 무관 동일).** 옵션1개 특별 분기 없음(2026-07-02 번복).
 
@@ -252,15 +267,18 @@ Windows 고대비를 켜면 OS가 우리 색을 시스템 팔레트로 강제 �
   - 일반(배송): **"배송 받으실 주소를 입력해주세요"**
   - 현장구매: "주문자 정보를 입력해주세요" (배송지 없으므로 기존 유지)
   - `variant="h3"`, `fontWeight: 800`
-- [ ] 부제: **"{이벤트명}" + `discountRate > 0`이면 " · {N}% 할인 적용"** (Step 0 헤더와 동일 패턴, 양쪽 모드 공통). 기존 "배송에 필요한 정보입니다"/"주문자 확인을 위한 정보입니다" 폐기
+- [ ] 부제: **"{이벤트명}"만** (Step 0 헤더와 동일 패턴, 양쪽 모드 공통). `· N% 할인 적용` 숫자 제거(2026-08-18). 기존 "배송에 필요한 정보입니다"/"주문자 확인을 위한 정보입니다" 폐기
 
 #### 섹션 1 — 필수 정보 (line 96-157)
 - [ ] 섹션 헤더: `variant="overline"`, "필수 정보" — `fontWeight: 700`, `color: text.secondary`
 - [ ] 필드 1: **성함** — `name="name"`, required, 시작 아이콘 `PersonIcon`(text.disabled, 20px), `inputSx` 적용(`borderRadius: '12px'`, minHeight 52, `bgcolor: '#F8F9FA'`, `fontSize: '16px'`)
-- [ ] 필드 2: **연락처** — `name="phone"`, required, placeholder "010-1234-5678", maxLength 13, helperText "숫자만 입력해주세요.", 시작 아이콘 `PhoneIcon`
-  - 자동 하이픈 포맷팅(`handlePhoneChange`, line 68-77): 3-4-4 패턴
-- [ ] 필드 3(조건부): **인싸이트 ID** — `hasOnlineCode=true`일 때만 노출. 라벨 "인싸이트 ID (온라인코드 구매 시 필수)", placeholder "인싸이트 홈페이지 ID를 입력해주세요", 시작 아이콘 `BadgeIcon`
-  - `hasOnlineCode` 판정: 카트에 `category === '온라인코드'` 또는 상품명에 "온라인" 포함하는 아이템이 있을 때 (`OrderPage.jsx:69`)
+- [ ] 필드 2: **연락처** — `name="phone"`, required, placeholder "010-1234-5678", maxLength 13, 시작 아이콘 `PhoneIcon`
+  - 자동 하이픈 포맷팅(`handlePhoneChange`): 3-4-4 패턴
+  - **유효성(2026-08-25):** 판정 = `isValidMobile`(`utils/formatPhone.js`, `normalizePhone` 후 `01`로 시작 10~11자리). **하드 차단은 Step 1→2 진입 게이트 한 곳**(`OrderPage.handleNext`) — 미완성·02 지역번호·검수용 난수 제출 시 차단 + 에러 알림 "휴대폰 번호를 확인해주세요. 접수 확인 알림톡이 이 번호로 발송됩니다."(접수 확인 알림톡이 유일한 연락 경로라 유실 방지). 필드는 **blur 후에만** 같은 검사로 인라인 error/헬퍼 표시(막지 않음·안내만), 유효/입력전엔 헬퍼 "숫자만 입력해주세요."
+- [ ] 필드 3(조건부): **인싸이트 ID** — `hasOnlineCode=true`일 때만 노출. 라벨 "인싸이트 ID (온라인코드 전달용)", placeholder "인싸이트 홈페이지 ID를 입력해주세요", helperText "구매하신 온라인코드를 이 계정으로 보내드려요. 인싸이트(inpsyt.co.kr) 로그인 아이디를 입력해주세요.", 시작 아이콘 `BadgeIcon`
+  - `hasOnlineCode` 판정: `utils/onlineCode.js`의 `hasOnlineCode(cartItems)` 단일 소스(서버 create-order 판정과 등가). **3상태 존중**(단순 OR 아님): `includes_online_code === true`→포함 / `=== false`→미포함(**문자열 폴백 차단, 오탐 방지**) / `null·undefined`→상품명 "온라인" 폴백(미확인·컬럼 미적용, 무회귀). `false`가 이름 매칭보다 강함 — 도서 "온라인상담개론" 등 온라인코드 무관 도서 오탐 차단. 죽은 조건 `category === '온라인코드'`는 제거(category 도메인=검사/도서/도구뿐이라 절대 참 안 됨)
+  - **소프트 필수**: 온라인코드 상품인데 ID 공란으로 제출 시 확인 다이얼로그("인싸이트 ID 없이 진행하면 온라인코드 전달이 늦어질 수 있어요. 계속할까요?"). "ID 입력하기"(Step 1로 이동) / "이대로 계속"(제출). 하드블록 아님 — 부스 결제 차단 방지. 판정 지점은 `OrderPage.jsx`의 `needsInpsytIdConfirm` 단일 변수(하드블록 전환 시 `isSubmittable`에 `&& !needsInpsytIdConfirm`만 추가)
+  - 라벨을 "필수"→"전달용"으로 바꾼 이유: 실제로 하드블록이 아니므로 "필수" 표기는 거짓. 출고 안전망(A3)이 공란건을 잡아준다
 
 #### 섹션 2 — 배송지 정보 (line 159-234, `!isOnsitePurchase`일 때만)
 - [ ] 구분선 `Divider` my 3
@@ -284,13 +302,15 @@ Windows 고대비를 켜면 OS가 우리 색을 시스템 팔레트로 강제 �
 
 #### 헤더 (line 35-43)
 - [ ] 페이지 제목: "주문 내용을 확인해주세요" — `variant="h3"`, `fontWeight: 800`
-- [ ] 부제: **"{이벤트명}" + `discountRate > 0`이면 " · {N}% 할인 적용"** (Step 0 헤더와 동일 패턴). 기존 "모든 정보가 올바른지 확인 후 제출해주세요" 폐기 (2026-06-01 건우님 결정)
+- [ ] 부제: **"{이벤트명}"만** (Step 0 헤더와 동일 패턴). `· N% 할인 적용` 숫자 제거(2026-08-18). 기존 "모든 정보가 올바른지 확인 후 제출해주세요" 폐기 (2026-06-01 건우님 결정)
 
 #### 카드 1 — 주문 상품 (line 45-93)
 - [ ] 카드 헤더 좌측: "주문 상품 · {N}건" — `variant="h5"`, `fontWeight: 700`
 - [ ] 카드 헤더 우측: "수정" 버튼 (small, `EditIcon` 14px) → `onGoToStep(0)` (Step 0으로 점프)
 - [ ] 아이템 행(상품마다 반복):
-  - 좌측: 상품명 (`variant="body2"`, `fontWeight: 600`) + 하단에 "{단가}원 x {수량}개" (`variant="caption"`, `text.secondary`)
+  - 좌측: 상품명 (`variant="body2"`, `fontWeight: 600`) + 하단 단가 표기
+    - **할인 행**(`getEffectiveRate(item, discountRate) > 0`): 정가 `caption` line-through(`text.disabled`) + `{N}%` `caption`/700 빨강(`error.main`) + "{할인단가}원 x {수량}개" `caption`(`text.secondary`) — 상품 카드와 동일 시각 언어 (2026-08-18)
+    - **무할인 행**: "{단가}원 x {수량}개" `caption`(`text.secondary`) 단독(취소선·% 없음)
   - 우측: 라인 합계 (`variant="subtitle2"`, `fontWeight: 700`)
   - 행 사이 `Divider`
 - [ ] 카드 보더 16px radius(인라인 — 시안에서는 토큰 라운드로 흡수), divider 보더
@@ -308,7 +328,7 @@ Windows 고대비를 켜면 OS가 우리 색을 시스템 팔레트로 강제 �
 
 #### 카드 3 — 결제 정보 (`CostSummary` embedded, line 120-125)
 - [ ] 섹션 제목: "결제 정보" — `variant="h5"`, `fontWeight: 700`
-- [ ] 무료배송 진행바(`!isOnsitePurchase`일 때만): 회색 카드(`#F2F4F6`, radius 12) 안에 안내문 + LinearProgress
+- [ ] 무료배송 진행바(`!isOnsitePurchase`일 때만): 회색 카드(`#F2F4F6`, radius 12) 안에 안내문 + LinearProgress. 진행·잔여·달성 판정은 `free_shipping_basis` 설정 기반 금액(정가/할인가, 기본 정가) — `shippingBasisAmount` 공유 함수 경유(2026-08-25)
   - 미달성: "무료배송까지 {남은금액}원 남았습니다!"
   - 달성: "무료배송 혜택이 적용되었습니다!"
   - LinearProgress 색: brand 그라데이션 — `linear-gradient(90deg, #2B398F 0%, #3d4db0 100%)` (시안에서는 단색 brand-700로 단순화 검토)
@@ -329,6 +349,7 @@ Windows 고대비를 켜면 OS가 우리 색을 시스템 팔레트로 강제 �
 - [ ] 안전 영역: `pb: max(12px, env(safe-area-inset-bottom))`
 
 #### Step 0 — 무료배송 안내 영역 (`!isOnsitePurchase` AND 장바구니 있음일 때, line 78-103)
+- [ ] 판정 기준: OrderPage가 `shippingBasisTotal`(설정 기반 정가/할인가, 기본 정가)을 `totalPrice`로 전달 — `FloatingBottomBar`는 이 값으로 임계치 비교(2026-08-25 통일)
 - [ ] 미달성 + 카트 있음: "무료배송까지 {남은}원 남았어요." (`variant="caption"`, `text.secondary`, `fontWeight: 600`) + LinearProgress(height 4)
 - [ ] 달성: "배송비가 무료로 적용됐어요!" (`primary.main`, `fontWeight: 700`)
 
@@ -362,13 +383,14 @@ Windows 고대비를 켜면 OS가 우리 색을 시스템 팔레트로 강제 �
 - [ ] 헤더 — "장바구니 {N}" (`variant="h4"`, `fontWeight: 800`, 숫자만 `primary.main`) + `CloseIcon` 우측
 - [ ] 아이템 행:
   - 상단: 상품명 (`variant="body2"`, `fontWeight: 600`) + 우측 `CloseIcon` 작은 삭제 버튼
+  - 중단(단가 표기, 2026-08-18): **할인 행**(`getEffectiveRate(item, discountRate) > 0`) 정가 `caption` line-through(`text.disabled`) + `{N}%` `caption`/700 빨강(`error.main`) + 할인단가 `caption`/600(`text.primary`) 한 줄(flexWrap — 좁은 바텀시트 폭 대응) / **무할인 행** 정가 `caption`(`text.secondary`) 단독. 상품 카드와 동일 시각 언어
   - 하단: 수량 스테퍼(보더 1px divider, `theme.radii.sm`=8) + 라인 합계 `variant="subtitle2"`(토큰 weight 700)
   - 수량 스테퍼: 수량 1에서 -1 누르면 `DeleteIcon`으로 전환(카트 제거), 2 이상이면 `RemoveIcon`
 - [ ] 빈 상태: `ui/EmptyState`(icon=`ShoppingCartOutlined`, title="장바구니가 비어있습니다")
 - [ ] 푸터(아이템 있을 때, `bgcolor: grey.50`):
   - **총 상품 금액 행**: `totalOriginalPrice`(정가 합계) — `caption`/`subtitle2`. (2026-06-01 건우님 — 시트에도 정가 대비 할인 표기)
   - **할인 금액 행**(할인 > 0): `-(totalOriginalPrice - totalPrice)`, `error.main` 빨강 — `caption`/`subtitle2`
-  - 배송비 행(`!isOnsitePurchase`): 정가(할인 전) 합계가 free_shipping_threshold 이상이면 "무료", 미달이면 `shipping_cost` 표시 (`variant="subtitle2"`)
+  - 배송비 행(`!isOnsitePurchase`): 무료배송 판정은 `constants/shipping.js`의 `calcShippingFee` 공유 함수 경유(2026-08-25). `free_shipping_basis` 설정에 따라 정가/할인가 합계로 판정, 기본 정가. 무료면 "무료", 부과면 `shippingFee` 표시 (`variant="subtitle2"`)
   - 총 금액 행: 라벨 `variant="body1"`, `text.secondary` + 합계 `variant="h4"`, `primary.main`, `fontWeight: 800`
   - 현장구매(`isOnsitePurchase=true`)면 배송비 행 미표시 + 합계는 배송비 미가산
 
@@ -382,11 +404,11 @@ Windows 고대비를 켜면 OS가 우리 색을 시스템 팔레트로 강제 �
 ## 액션·기능 (누락 금지)
 
 - [ ] 진입 시 데이터 페치(`useEffect`, line 73-124):
-  1. `site_settings`에서 `free_shipping_threshold`, `shipping_cost` 단일 행 조회. 실패 시 기본값(30000/3000) 유지.
+  1. `site_settings`에서 `*` 단일 행 조회(`free_shipping_threshold`, `shipping_cost`, `free_shipping_basis` 포함). 실패 시 기본값(30000/3000, basis=정가) 유지. `free_shipping_basis` 컬럼 미적용 시 응답에서 빠져 정가 폴백(graceful).
   2. `eventSlug` 없으면 `accessError='no_slug'` 설정 후 종료.
   3. `events` 테이블에서 `order_url_slug = eventSlug` 단일 행 조회. 없으면 `not_found`.
   4. 오늘 날짜(KST `getTodayKST`)가 `start_date~end_date` 밖이면 `expired`.
-  5. 통과 시 `eventInfo` 저장 (`id`, `name`, `discount_rate`, `tags`, `start_date`, `end_date`, `estimated_delivery_date`).
+  5. 통과 시 `eventInfo` 저장 (`id`, `name`, `discount_rate`, `tags`, `host_society`, `start_date`, `end_date`, `estimated_delivery_date`). `host_society`는 primary·fallback select 양쪽에 포함(컬럼 미적용 환경 일관성).
 
 - [ ] 접근 차단 화면(`accessError` 있을 때, line 224-256):
   - 3가지 케이스 메시지 매핑:
@@ -436,7 +458,7 @@ Windows 고대비를 켜면 OS가 우리 색을 시스템 팔레트로 강제 �
 - [ ] 서버측 금액 재계산 (`supabase/functions/create-order/index.ts:57-84`):
   - 클라이언트가 보낸 금액은 신뢰하지 않음. 서버가 `products`·`events`·`site_settings`를 다시 조회해 재계산.
   - `is_discountable=true`인 상품만 `discount_rate` 적용 (반올림 `Math.round`)
-  - 총 정가가 `free_shipping_threshold` 이상이면 배송비 0
+  - 무료배송 판정: `free_shipping_basis`(정가/할인가, 기본 정가) 기준 합계가 `free_shipping_threshold` 이상이면 배송비 0 (병렬 백엔드가 클라와 동일 규칙으로 통일, 2026-08-25)
   - DB INSERT 컬럼: `total_cost` / `discount_amount` / `delivery_fee` / `final_payment` + `status_history` 배열 시작값
 
 - [ ] 알림톡 발송:
@@ -447,7 +469,7 @@ Windows 고대비를 켜면 OS가 우리 색을 시스템 팔레트로 강제 �
 
 - [ ] `customer_name` — `name` 단일 필드 (성+이름 분리 안 함)
 - [ ] `customer_phone` — `phone` 단일 필드. 클라이언트에서 010-XXXX-XXXX 포맷팅 적용
-- [ ] `inpsyt_id` — 조건부 단일 필드. **카트에 온라인코드 상품이 있을 때만 노출**
+- [ ] `inpsyt_id` — 조건부 단일 필드. **카트에 온라인코드 상품이 있을 때만 노출**. 소프트 필수(공란 제출 시 확인 다이얼로그만, 하드블록 아님). 온라인코드 탐지 = `utils/onlineCode.js` — 3상태(true=포함 / false=미포함, 문자열 폴백 차단 / null·undefined=상품명 "온라인" 폴백)
 - [ ] **배송지 — 세 필드 분리 (절대 한 줄로 통합 금지):**
   - `address` (도로명, readOnly, 모달로만 채움)
   - `detailAddress` (자유 입력)
@@ -481,7 +503,8 @@ Windows 고대비를 켜면 OS가 우리 색을 시스템 팔레트로 강제 �
 - 스냅샷 컬럼(주문 시점 박제): `product_name`, `product_code`, `category`, `list_price`
 
 ### `events` 테이블 (조회만)
-- `id`, `name`, `discount_rate`, `tags` (jsonb 배열), `start_date`, `end_date`, `order_url_slug`, `estimated_delivery_date`
+- `id`, `name`, `discount_rate`, `tags` (jsonb 배열), `host_society`, `start_date`, `end_date`, `order_url_slug`, `estimated_delivery_date`
+- `host_society` (text) — 주최 학회명. `products.tags` 문자열과 정확 일치하도록 운영 중이라, 이 값으로 학회 관련 상품을 진열 상단 정렬(§상품 그리드 정렬 규칙). anon `GRANT SELECT (host_society)` 적용 완료(화이트리스트 12).
 - `visible_categories` (text[], nullable — `20260624000000_DRAFT`): 행사 주문서 노출 대분류 화이트리스트. NULL/빈 배열=전체 노출. 값 있으면 원본 `products.category` ∈ 이 배열인 상품만. anon 공개 컬럼(GRANT 화이트리스트 포함). **graceful**: 컬럼/GRANT 미적용 시 OrderPage가 레거시 select fallback → 전체 노출.
 
 ### `products` 테이블 (조회만)
@@ -496,6 +519,7 @@ Windows 고대비를 켜면 OS가 우리 색을 시스템 팔레트로 강제 �
 ### `site_settings` 테이블 (단일 행)
 - `free_shipping_threshold` (default 30000)
 - `shipping_cost` (default 3000)
+- `free_shipping_basis` (text, `'list_price' | 'discounted'`, NULL=정가 폴백; 2026-08-25 추가 — 무료배송 판정 기준 정가/할인가 택일)
 
 ## 권한별 차이
 
@@ -505,7 +529,7 @@ Windows 고대비를 켜면 OS가 우리 색을 시스템 팔레트로 강제 �
 
 - [ ] 뷰 모드 칩: `all`/`popular`/`new` (기본 `popular`)
 - [ ] 카테고리 칩: `all` + 동적 카테고리 목록 (기본 `all`)
-- [ ] 학회 태그 필터: `eventInfo.tags` 배열. 뷰 모드가 `all`이 아니고 검색어가 없을 때만 적용
+- [ ] 학회 태그: **정렬 우선순위로만 작동**(필터 아님). `eventTags` = `eventInfo.tags` ∪ `eventInfo.host_society`. 매칭 상품/검사군을 최상단, 나머지는 아래(숨김 없음). 2026-08-18 필터→정렬 전환.
 - [ ] 검색: 상품명 부분 일치(`matchesSearch` 유틸 — 띄어쓰기로 여러 키워드 AND)
 
 ## 빈 상태·로딩·오류 처리
