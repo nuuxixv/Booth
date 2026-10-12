@@ -35,6 +35,7 @@ import { supabase } from '../supabaseClient';
 import { useAuth } from '../hooks/useAuth';
 import { useNotification } from '../hooks/useNotification';
 import { summarizeGroupStatus } from '../utils/groupOrder';
+import { fulfillmentCounts } from '../utils/fulfillmentCounts';
 import { formatPhone, normalizePhone } from '../utils/formatPhone';
 import { orderHasOnlineCode } from '../utils/onlineCode';
 import { PageHeader, SectionCard, StatusBadge, InfoRow, ActionSlot, EmptyState } from './ui';
@@ -597,9 +598,10 @@ const FulfillmentPage = () => {
     return isOrderVisible(orderType, viewMode);
   }), [orders, viewMode]);
 
-  const pendingCount = baseOrders.filter(o => effectiveStatus(o) === 'paid').length;
-  const completedCount = baseOrders.filter(o => effectiveStatus(o) === 'completed').length;
-  const totalCount = baseOrders.length;
+  // 집계는 공용 규칙(utils/fulfillmentCounts)으로 — 학회 상세 출고 현황과 동일 규칙.
+  // viewMode·자식 제외는 baseOrders에서 이미 적용(합배송 껍데기=1건, 상태=effectiveStatus).
+  const { total: totalCount, completed: completedCount, pending: pendingCount } =
+    useMemo(() => fulfillmentCounts(baseOrders), [baseOrders]);
   // 온라인코드 ID 누락 건수 — 출고 대기(paid)만 집계. 완료건은 이미 처리됐으니 조치 대상 아님.
   const missingIdCount = useMemo(
     () => baseOrders.filter(o => effectiveStatus(o) === 'paid' && isMissingInpsytId(o)).length,
