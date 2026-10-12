@@ -301,6 +301,13 @@ const LoginPage = () => {
     }
   }, [error, loading, currentStep]);
 
+  // 브라우저 탭 title — 어드민 진입점이므로 Booth 노출 (BRAND_Booth.md §3).
+  // 언마운트 시 고객 기준 중립 문구로 복원(고객 라우트 누수 방지).
+  useEffect(() => {
+    document.title = 'Booth — 로그인';
+    return () => { document.title = '인싸이트 주문서'; };
+  }, []);
+
   return (
     <Box
       sx={{
@@ -344,16 +351,26 @@ const LoginPage = () => {
           </IconButton>
         )}
 
-        {/* 로고 — 토큰화. 시안 답습으로 LOGO.svg + 부제 */}
+        {/* 브랜드 — 소속(인싸이트 로고) + 서비스명(Booth 워드마크) 세로 2단 스택.
+            BRAND_Booth.md §4: 소속=인싸이트 로고, 서비스=Booth 텍스트 타이포. 태그라인 미표시. */}
         <Box sx={{ textAlign: 'center', mb: 3, mt: (selectedRole || selectedUser) ? 1 : 0 }}>
           <Box
             component="img"
             src="/LOGO.svg"
             alt="인싸이트"
-            sx={{ height: 40, mb: 1, display: 'inline-block' }}
+            sx={{ height: 32, mb: 1, display: 'block', mx: 'auto' }}
           />
-          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
-            인싸이트 현장주문 어드민
+          <Typography
+            component="div"
+            sx={{
+              fontSize: 28,
+              fontWeight: 800,
+              color: 'text.primary',
+              letterSpacing: '-0.02em',
+              lineHeight: 1,
+            }}
+          >
+            Booth
           </Typography>
         </Box>
 

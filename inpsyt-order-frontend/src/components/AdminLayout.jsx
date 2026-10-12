@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Box } from '@mui/material'; // Container 제거
 import AdminHeader from './AdminHeader';
 import AdminSidebar from './AdminSidebar';
@@ -20,6 +20,21 @@ import NotificationsDisplay from './NotificationsDisplay';
 import { useAuth } from '../hooks/useAuth';
 import { useNotification } from '../hooks/useNotification';
 import { supabase } from '../supabaseClient';
+
+// 브라우저 탭 title — 어드민 라우트 전용 페이지명 (BRAND_Booth.md §3).
+// pathname 2번째 세그먼트(/admin/{seg}) 기준. 매칭 없으면 "Booth" 단독.
+const ADMIN_PAGE_TITLES = {
+  dashboard:   '대시보드',
+  orders:      '주문 관리',
+  events:      '학회 관리',
+  products:    '상품 관리',
+  fulfillment: '출고 관리',
+  users:       '사용자 관리',
+  feedback:    '피드백 관리',
+  bulletins:   '게시판',
+  'audit-log': '로그',
+  settings:    '설정',
+};
 
 // /admin/events/:slug? — slug 있으면 L2 학회 상세, 없으면 L1 학회 목록
 const EventsRoute = () => {
@@ -71,6 +86,7 @@ const AdminLayout = () => {
   const { hasPermission, permissions, profile } = useAuth();
   const { addNotification } = useNotification();
   const navigate = useNavigate();
+  const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -108,6 +124,15 @@ const AdminLayout = () => {
 
   // 마운트 시 권한 재확인(다른 탭·OS 설정에서 바뀌었을 수 있음).
   useEffect(() => { setNotifPermission(readPermission()); }, []);
+
+  // 브라우저 탭 title — 어드민 라우트에서만 Booth 노출 (BRAND_Booth.md §3).
+  // 언마운트(고객 라우트 이동 등) 시 중립 문구 복원 → 고객 접점 누수 방지.
+  useEffect(() => {
+    const seg = location.pathname.split('/')[2];
+    const label = ADMIN_PAGE_TITLES[seg];
+    document.title = label ? `Booth — ${label}` : 'Booth';
+    return () => { document.title = '인싸이트 주문서'; };
+  }, [location.pathname]);
 
   // 브라우저 알림 토글 — ON 클릭 시점(사용자 제스처)에 권한 요청.
   const handleToggleBrowserNotif = useCallback(async () => {
