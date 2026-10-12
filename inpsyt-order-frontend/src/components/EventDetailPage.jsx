@@ -12,7 +12,6 @@ import {
   PersonOutline as PersonIcon,
   StickyNote2Outlined as NoteIcon,
   PaymentsOutlined as CostIcon,
-  Edit as EditIcon,
   Delete as DeleteIcon,
   ReceiptLong as ReceiptLongIcon,
   Description as DescriptionIcon,
@@ -735,15 +734,15 @@ const EventDetailPage = () => {
   const hasFulfillment = !!fulfillment && fulfillment.total > 0;
   const titleName = event.host_society || event.name;
 
-  // 헤더 액션 = "학회 정보 수정" 1개만(입금결의서·지불증은 ⑥ 사후 업무 "문서 내보내기"로 이동).
-  const headerAction = canEdit && !editingOverview ? (
+  // 개요 카드 액션 = "편집"(참석준비 카드와 같은 형태). 헤더 액션은 두지 않는다(2026-10-12 건우님).
+  const overviewAction = canEdit && !editingOverview ? (
     <Button
       size="small" variant="outlined"
-      startIcon={<EditIcon sx={{ fontSize: 16 }} />}
+      startIcon={<PrepEditIcon sx={{ fontSize: 16 }} />}
       onClick={startEditOverview}
       sx={{ minHeight: 36 }}
     >
-      학회 정보 수정
+      편집
     </Button>
   ) : undefined;
 
@@ -773,7 +772,6 @@ const EventDetailPage = () => {
           </Box>
         }
         icon={EventNoteIcon}
-        action={headerAction}
       />
       {/* 상태배지 + 할인율 — 헤더 직하 */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3, mt: -1 }}>
@@ -787,7 +785,7 @@ const EventDetailPage = () => {
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
         {/* ─── ① 학회 개요 (읽기 요약 ↔ 편집 폼 모드 스왑) ─── */}
         <Box ref={(el) => { overviewRef.current = el; sectionRefs.current.overview = el; }}>
-          <SectionCard title="학회 개요" icon={EventNoteIcon}>
+          <SectionCard title="학회 개요" icon={EventNoteIcon} action={overviewAction}>
             {editingOverview && overviewForm ? (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <EventAutofillFields
