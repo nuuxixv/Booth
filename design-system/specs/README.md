@@ -54,6 +54,8 @@
 - `A9_AuditLogPage.md` — 로그 (표시 라벨 "로그", 내부 audit_log)
 - `A10_EventHubList.md` — 학회 통합 목록 L1 (6컬럼·신규 4필드·Upcoming)
 - `A10_PaymentReceiptModal.md` — 지불증(수당 영수증) 생성 모달 (**기획 확정 — A10 P0 머지 후 착수**)
+- `A11_EventCreatePage.md` — 행사 생성 페이지 (단일 페이지·점진 노출) *(2026-10-12 설치/철거 시간·장소 3분리·DB 5컬럼)*
+- `A12_PrepNoteTemplates.md` — 준비노트 템플릿 (전용 테이블·관리 모달·L2 적용 흐름) *(2026-10-12 신설, 학회 개선 트랙 2차)*
 
 **고객 (C)**
 - `C1_OrderPage.md` — 고객 주문서 (3-step) *(2026-06-24 소분류 칩 노출·배지 가드레일 추가)*
