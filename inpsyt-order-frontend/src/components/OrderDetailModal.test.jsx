@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ThemeProvider } from '@mui/material';
 import { MemoryRouter } from 'react-router-dom';
@@ -19,6 +19,7 @@ vi.mock('../supabaseClient', () => {
     eq: vi.fn(),
     order: vi.fn(),
     in: vi.fn(),
+    update: vi.fn(),
   });
   // 모든 체인 메서드가 동일한 thenable chain을 반환
   chain.select.mockReturnValue(chain);
@@ -26,6 +27,7 @@ vi.mock('../supabaseClient', () => {
   chain.eq.mockReturnValue(chain);
   chain.order.mockReturnValue(chain);
   chain.in.mockReturnValue(chain);
+  chain.update.mockReturnValue(chain);
   return {
     supabase: {
       rpc: vi.fn(),
@@ -96,6 +98,15 @@ const renderModal = (order, overrides = {}) => {
   );
 };
 
+// 섹션별 인라인 편집(사양 A2) — 편집 버튼은 섹션마다 하나씩 있으므로 섹션 제목 기준으로 찾는다.
+// 제목에서 위로 올라가 '편집' 버튼을 처음 포함하는 조상(= 그 섹션 헤더)에서 버튼을 꺼낸다.
+// 섹션 카드들은 한 컨테이너의 형제라, 헤더를 지나치면 버튼이 여럿이 되어 queryByRole이 즉시 throw한다(오매칭 방지).
+const getSectionEditButton = (sectionTitle) => {
+  let el = screen.getByText(sectionTitle);
+  while (el && !within(el).queryByRole('button', { name: '편집' })) el = el.parentElement;
+  return within(el).getByRole('button', { name: '편집' });
+};
+
 describe('OrderDetailModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -106,29 +117,26 @@ describe('OrderDetailModal', () => {
     //   할인가: 28,800원 → threshold 미달
     //   Bug: 28,800 < 30,000 → 배송비 3,000원, 최종 31,800원 (틀림)
     //   Fix: 32,000 >= 30,000 → 배송비 0원, 최종 28,800원 (맞음)
+    // (site_settings.free_shipping_basis 미설정 = 기본 정가 기준)
     const highValueOrder = {
       ...mockOrder,
       event_id: 101, // discount_rate: 0.1
       order_items: [{ product_id: 3, quantity: 1 }],
     };
-    const extendedProductsMap = {
-      ...mockProductsMap,
-      3: { id: 3, name: '고가 상품', list_price: 32000 },
-    };
+    // is_discountable: true — 할인 공식(getDiscountedUnit)이 할인 대상 상품에만 행사율을 적용한다.
+    const highValueProduct = { id: 3, name: '고가 상품', list_price: 32000, is_discountable: true };
 
     renderModal(highValueOrder, {
-      productsMap: extendedProductsMap,
-      products: [...mockProducts, { id: 3, name: '고가 상품', list_price: 32000 }],
+      productsMap: { ...mockProductsMap, 3: highValueProduct },
+      products: [...mockProducts, highValueProduct],
     });
 
-    const editButton = screen.getByRole('button', { name: /편집/i });
-    fireEvent.click(editButton);
+    // 금액 재계산은 '주문 상품 목록' 섹션 편집 중에만 일어난다.
+    fireEvent.click(getSectionEditButton('주문 상품 목록'));
 
     // 정가(32,000) >= threshold(30,000) → 배송비 0원, 최종결제 28,800원
-    // 할인가(28,800)와 최종금액(28,800) 모두 동일하게 표시됨
     await waitFor(() => {
-      const matches = screen.getAllByText('28,800원');
-      expect(matches.length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText('총 결제 금액').parentElement).toHaveTextContent('28,800원');
     });
     // 배송비가 3,000원으로 잘못 계산되면 최종금액이 31,800원이 됨 (버그 증거)
     expect(screen.queryByText('31,800원')).not.toBeInTheDocument();
@@ -161,40 +169,35 @@ describe('OrderDetailModal', () => {
     expect(screen.getByText('2')).toBeInTheDocument(); // 수량
   });
 
-  it('편집 후 저장 버튼을 누르면, rpc 함수가 올바른 데이터와 함께 호출되어야 한다', async () => {
-    // supabase.rpc가 성공적으로 응답하도록 모킹
-    supabase.rpc.mockResolvedValue({ error: null });
-
+  it('주문자 정보 섹션을 편집 후 저장하면, orders 부분 UPDATE가 변경값으로 호출되어야 한다', async () => {
     renderModal(mockOrder);
 
-    // 1. '편집' 버튼을 클릭하여 편집 모드로 전환
-    const editButton = screen.getByRole('button', { name: /편집/i });
-    fireEvent.click(editButton);
+    // 1. '주문자 정보' 섹션의 편집 버튼으로 그 섹션만 편집 상태로 전환
+    fireEvent.click(getSectionEditButton('주문자 정보'));
 
     // 2. '주문자명' 입력 필드의 값을 '김민준'으로 변경
     const customerNameInput = screen.getByDisplayValue('홍길동');
     fireEvent.change(customerNameInput, { target: { value: '김민준' } });
 
-    // 3. '저장' 버튼 클릭
-    const saveButton = screen.getByRole('button', { name: /저장/i });
-    fireEvent.click(saveButton);
+    // 3. 섹션의 '저장' 버튼 클릭
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
 
-    // 4. supabase.rpc 함수가 올바른 인자와 함께 호출되었는지 확인
+    // 4. orders 테이블 부분 UPDATE가 변경값·주문 id로 호출되었는지 확인
+    //    (모든 from() 호출은 같은 thenable chain을 반환한다 — 상단 모킹 참조)
+    const chain = supabase.from.mock.results[0].value;
     await waitFor(() => {
-      expect(supabase.rpc).toHaveBeenCalledTimes(1);
-      expect(supabase.rpc).toHaveBeenCalledWith(
-        'update_order_details',
-        expect.objectContaining({
-          updates_param: expect.objectContaining({
-            customer_name: '김민준', // 변경된 이름이 포함되었는지 확인
-          }),
-        })
+      expect(supabase.from).toHaveBeenCalledWith('orders');
+      expect(chain.update).toHaveBeenCalledWith(
+        expect.objectContaining({ customer_name: '김민준' })
       );
+      expect(chain.eq).toHaveBeenCalledWith('id', mockOrder.id);
     });
+    // 섹션별 편집 재설계(2026-07-07) 이후 update_order_details RPC는 쓰지 않는다.
+    expect(supabase.rpc).not.toHaveBeenCalled();
 
     // 5. 성공 알림이 표시되는지 확인
     await waitFor(() => {
-        expect(addNotification).toHaveBeenCalledWith('주문 정보가 성공적으로 업데이트되었습니다.', 'success');
+      expect(addNotification).toHaveBeenCalledWith('주문자 정보가 저장되었습니다.', 'success');
     });
   });
 });
