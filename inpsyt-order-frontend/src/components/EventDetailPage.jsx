@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, Suspense, lazy } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Box, Typography, Button, IconButton, CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions, useTheme,
+  Box, Typography, Button, IconButton, CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions, useTheme, useMediaQuery,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
@@ -23,12 +23,15 @@ import {
   Build as ToolIcon,
   Assignment as ReportIcon,
   LocalOffer as LocalOfferIcon,
-  EditNote as EditNoteIcon,
   EditOutlined as PrepEditIcon,
   Close as CloseIcon,
-  LockOutlined as LockIcon,
   Inventory2Outlined as PrepIcon,
   VisibilityOutlined as ViewsIcon,
+  QrCode2 as QrCode2Icon,
+  OpenInNew as OpenInNewIcon,
+  ContentCopy as ContentCopyIcon,
+  CheckCircleOutline as CheckCircleIcon,
+  LocalShippingOutlined as ShippingIcon,
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import { supabase } from '../supabaseClient';
@@ -42,14 +45,18 @@ import {
   getEventBySlug, updateEventProgress, updateEventPrepNote, getOrdersForEventRevenue,
   recordEventView, getEventViewers,
 } from '../api/events';
+import { getFulfillmentOrders, groupLinkedOrders } from '../api/orders';
+import { fulfillmentCounts } from '../utils/fulfillmentCounts';
 import { fetchProductCountByCategory } from '../api/products';
 import { applyAutofill, normalizeEventPayload, isRequiredComplete } from '../utils/eventForm';
 import { useSlugCheck } from '../hooks/useSlugCheck';
 import { encodeForStorage } from '../utils/prepNoteImages';
+import { buildOrderUrl, copyToClipboard, generateOrderQrSvg, downloadQrSvg } from '../utils/eventUrl';
 import { PageHeader, SectionCard, StatCard, StatusBadge, EmptyState, DraftBanner, DraftSavedHint } from './ui';
 import { useFormDraft } from '../hooks/useFormDraft';
 import FieldReportSection from './FieldReportSection';
 import PaymentReceiptModal from './PaymentReceiptModal';
+import EventQrDialog from './EventQrDialog';
 import EventAutofillFields from './EventAutofillFields';
 import EventRequiredFields from './EventRequiredFields';
 import EventOptionalFields from './EventOptionalFields';
@@ -172,8 +179,88 @@ const OverviewRow = ({ icon, label, children, alignTop }) => (
 
 const ROW_ICON_SX = { fontSize: 16, color: 'text.disabled', flexShrink: 0 };
 
-// 진행상태 토글 칩(기안/신청/지결) — 독립 토글. events:edit자만.
-const ProgressChip = ({ label, done, canEdit, onToggle }) => {
+// ─── 진행 요약 바 (읽기 전용 네비 · 단계 클릭 → 앵커 스크롤) ──────
+// 6단계 유지. 모든 폭에서 6칸 한 줄(가로 스크롤 없음 — 모바일도 Read로 전체 파악).
+//  - 375px(xs): 번호·체크 원 위 + 짧은 라벨 아래(세로), 6칸 균등.
+//  - 600px+(sm·md): 원 + 전체 라벨(가로), 6칸 균등.
+// ②③④는 어느 것을 눌러도 합친 "상신·신청" 카드(target=presubmit)로 이동 + 해당 행 잠깐 강조.
+const STEPS = [
+  { id: 'overview', target: 'overview', no: 1, nav: '개요', short: '개요' },
+  { id: 'draft', target: 'presubmit', no: 2, nav: '기안서', short: '기안', col: 'draft' },
+  { id: 'application', target: 'presubmit', no: 3, nav: '참석 신청', short: '신청', col: 'application' },
+  { id: 'payment', target: 'presubmit', no: 4, nav: '지출결의서', short: '지출', col: 'paymentResolution' },
+  { id: 'prep', target: 'prep', no: 5, nav: '참석준비', short: '준비' },
+  { id: 'post', target: 'post', no: 6, nav: '사후 업무', short: '사후' },
+];
+
+const StepTab = ({ step, progress, onJump }) => {
+  const theme = useTheme();
+  const hasDone = !!step.col;
+  const done = hasDone ? progress[step.col] : false;
+  return (
+    <Box
+      role="button"
+      tabIndex={0}
+      onClick={() => onJump(step)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onJump(step); } }}
+      sx={{
+        display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: 'center', justifyContent: 'center',
+        gap: { xs: 0.375, sm: 1 }, px: { xs: 0.25, sm: 1.5 }, minHeight: 44, flex: 1, minWidth: 0,
+        borderRadius: `${theme.radii.md}px`, cursor: 'pointer',
+        border: `1px solid ${done ? alpha(theme.palette.primary.main, 0.3) : theme.gray[200]}`,
+        bgcolor: done ? alpha(theme.palette.primary.main, 0.06) : 'transparent',
+        transition: `all 0.15s ${theme.easing.toss}`,
+        '&:hover': { bgcolor: done ? alpha(theme.palette.primary.main, 0.12) : theme.gray[50], borderColor: done ? alpha(theme.palette.primary.main, 0.4) : theme.gray[300] },
+        '&:focus-visible': { outline: 'none', boxShadow: theme.customShadows.focus },
+      }}
+    >
+      <Box
+        sx={{
+          width: 22, height: 22, flexShrink: 0, borderRadius: '50%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          bgcolor: done ? 'primary.main' : theme.gray[100],
+          border: hasDone && !done ? `1.5px solid ${theme.gray[300]}` : 'none',
+        }}
+      >
+        {done ? (
+          <CheckIcon sx={{ fontSize: 13, color: 'primary.contrastText' }} />
+        ) : (
+          <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.secondary', lineHeight: 1, fontFeatureSettings: '"tnum" 1' }}>
+            {step.no}
+          </Typography>
+        )}
+      </Box>
+      {/* 모바일 = 짧은 라벨 / 태블릿·PC = 전체 라벨 */}
+      <Typography variant="caption" sx={{ display: { xs: 'block', sm: 'none' }, fontWeight: 600, color: done ? 'primary.main' : 'text.primary', lineHeight: 1.2 }}>
+        {step.short}
+      </Typography>
+      <Typography variant="body2" sx={{ display: { xs: 'none', sm: 'block' }, fontWeight: 600, color: done ? 'primary.main' : 'text.primary', whiteSpace: 'nowrap' }}>
+        {step.nav}
+      </Typography>
+    </Box>
+  );
+};
+
+const SummaryBar = ({ progress, onJump }) => {
+  const theme = useTheme();
+  const doneCount = ['draft', 'application', 'paymentResolution'].filter((k) => progress[k]).length;
+  return (
+    <Box sx={{ bgcolor: 'background.paper', border: `1px solid ${theme.gray[200]}`, borderRadius: `${theme.radii.lg}px`, p: 2, mb: 3 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5, flexWrap: 'wrap' }}>
+        <Typography variant="subtitle2" sx={{ color: 'text.primary' }}>진행 단계</Typography>
+        <Typography variant="caption" sx={{ color: 'text.secondary', fontFeatureSettings: '"tnum" 1' }}>
+          상신 3단계 중 {doneCount}단계 완료 · 단계를 누르면 해당 항목으로 이동
+        </Typography>
+      </Box>
+      <Box sx={{ display: 'flex', gap: { xs: 0.5, sm: 1 }, flexWrap: 'nowrap' }}>
+        {STEPS.map((step) => <StepTab key={step.id} step={step} progress={progress} onJump={onJump} />)}
+      </Box>
+    </Box>
+  );
+};
+
+// ─── 완료 토글 체크 행 (②③④ — 합친 카드 안 3행. 독립 토글·순서 강제 없음) ──
+const ProgressCheckRow = ({ label, done, canEdit, flash, onToggle }) => {
   const theme = useTheme();
   return (
     <Box
@@ -182,36 +269,44 @@ const ProgressChip = ({ label, done, canEdit, onToggle }) => {
       onClick={canEdit ? onToggle : undefined}
       onKeyDown={canEdit ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } } : undefined}
       sx={{
-        display: 'inline-flex', alignItems: 'center', gap: 0.75,
-        px: 1.5, minHeight: 44,
-        borderRadius: `${theme.radii.md}px`,
-        cursor: canEdit ? 'pointer' : 'default',
-        bgcolor: done ? alpha(theme.palette.primary.main, 0.1) : theme.gray[50],
+        display: 'flex', alignItems: 'center', gap: 1.5, px: 1.5, py: 1, minHeight: 44,
+        borderRadius: `${theme.radii.md}px`, cursor: canEdit ? 'pointer' : 'default',
+        bgcolor: done ? alpha(theme.palette.primary.main, 0.08) : theme.gray[50],
         border: `1px solid ${done ? alpha(theme.palette.primary.main, 0.3) : theme.gray[200]}`,
+        boxShadow: flash ? theme.customShadows.focus : 'none',
         transition: `all 0.15s ${theme.easing.toss}`,
-        '&:hover': canEdit
-          ? { bgcolor: done ? alpha(theme.palette.primary.main, 0.16) : theme.gray[100], borderColor: done ? alpha(theme.palette.primary.main, 0.4) : theme.gray[300] }
-          : {},
+        '&:hover': canEdit ? { bgcolor: done ? alpha(theme.palette.primary.main, 0.14) : theme.gray[100], borderColor: done ? alpha(theme.palette.primary.main, 0.4) : theme.gray[300] } : {},
         '&:focus-visible': { outline: 'none', boxShadow: theme.customShadows.focus },
       }}
     >
       <Box
         sx={{
-          width: 18, height: 18, flexShrink: 0,
-          borderRadius: '50%',
+          width: 22, height: 22, flexShrink: 0, borderRadius: '50%',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           bgcolor: done ? 'primary.main' : 'transparent',
           border: done ? 'none' : `1.5px solid ${theme.gray[300]}`,
         }}
       >
-        {done && <CheckIcon sx={{ fontSize: 12, color: 'primary.contrastText' }} />}
+        {done && <CheckIcon sx={{ fontSize: 14, color: 'primary.contrastText' }} />}
       </Box>
-      <Typography
-        variant="body2"
-        sx={{ fontWeight: done ? 700 : 600, color: done ? 'primary.main' : 'text.secondary' }}
-      >
+      <Typography variant="body2" sx={{ flex: 1, minWidth: 0, fontWeight: done ? 700 : 600, color: done ? 'primary.main' : 'text.primary' }}>
         {label}
       </Typography>
+      <Typography variant="caption" sx={{ flexShrink: 0, fontWeight: 600, color: done ? 'primary.main' : 'text.secondary', whiteSpace: 'nowrap' }}>
+        {done ? '완료' : (canEdit ? '완료로 표시' : '미완료')}
+      </Typography>
+    </Box>
+  );
+};
+
+// ─── 사후 업무 하위 블록(카드 안 카드 금지 — 라벨+구분선으로 구획) ──
+const PostSubSection = ({ label, caption, first, children }) => {
+  const theme = useTheme();
+  return (
+    <Box sx={{ mt: first ? 0 : 3, pt: first ? 0 : 3, borderTop: first ? 'none' : `1px solid ${theme.gray[100]}` }}>
+      <Typography variant="subtitle2" sx={{ color: 'text.primary', mb: caption ? 0.25 : 1.5 }}>{label}</Typography>
+      {caption && <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>{caption}</Typography>}
+      {children}
     </Box>
   );
 };
@@ -229,6 +324,7 @@ const EventDetailPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, profile, hasPermission } = useAuth();
   const { addNotification } = useNotification();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   const canEdit = hasPermission('events:edit');
   const isMaster = hasPermission('master');
@@ -245,6 +341,9 @@ const EventDetailPage = () => {
 
   // 매출
   const [orders, setOrders] = useState([]);
+
+  // 출고 현황 — { total, completed, pending } | null(미조회/실패 → 빈 상태 graceful)
+  const [fulfillment, setFulfillment] = useState(null);
 
   // 준비 노트
   const [editingNote, setEditingNote] = useState(false);
@@ -270,6 +369,16 @@ const EventDetailPage = () => {
   const editParamHandledRef = useRef(false);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+
+  // 주문서 QR 다이얼로그(목록·상세 공용)
+  const [qrOpen, setQrOpen] = useState(false);
+  const [qrSvg, setQrSvg] = useState('');
+
+  // 진행 요약 바 앵커 스크롤 + ②③④ 점프 시 해당 행 잠깐 강조
+  const sectionRefs = useRef({});
+  const setSectionRef = (id) => (el) => { sectionRefs.current[id] = el; };
+  const [flashStep, setFlashStep] = useState(null);
+  const flashTimer = useRef(null);
 
   // 개요 편집 폼 slug 검사 — 자기 자신(event.id) 제외.
   const slugState = useSlugCheck(overviewForm?.order_url_slug || '', { excludeId: event?.id });
@@ -303,11 +412,17 @@ const EventDetailPage = () => {
       if (!staffRes.error && staffRes.data) setStaff(staffRes.data);
       if (!societiesRes.error && societiesRes.data) setSocieties(societiesRes.data);
 
-      // 매출 주문 — paid 필터는 util이 수행
+      // 매출 주문 — paid 필터는 util이 수행(모집단 = 자식 실주문)
       try {
         const ords = await getOrdersForEventRevenue(ev.id);
         setOrders(ords);
       } catch { setOrders([]); }
+
+      // 출고 현황 — 출고 관리와 동일 규칙(paid+completed · 합배송 껍데기=1건). 매출과 모집단 다름.
+      try {
+        const fData = await getFulfillmentOrders({ eventId: ev.id, statuses: ['paid', 'completed'] });
+        setFulfillment(fulfillmentCounts(groupLinkedOrders(fData || [])));
+      } catch { setFulfillment(null); }
     } catch (e) {
       console.error(e);
       addNotification('학회 정보를 불러오지 못했습니다.', 'error');
@@ -397,6 +512,16 @@ const EventDetailPage = () => {
     } catch {
       setProgress((p) => ({ ...p, [key]: !next })); // 롤백
       addNotification('진행 상태 저장에 실패했습니다.', 'error');
+    }
+  };
+
+  // 진행 요약 바 → 섹션 앵커 스크롤 + (②③④면) 해당 행 ~1.6초 강조
+  const jumpToStep = (step) => {
+    sectionRefs.current[step.target]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (step.target === 'presubmit' && step.col) {
+      setFlashStep(step.col);
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+      flashTimer.current = setTimeout(() => setFlashStep(null), 1600);
     }
   };
 
@@ -540,41 +665,46 @@ const EventDetailPage = () => {
     setExporting(false);
   };
 
+  // ─── 주문서(열기·복사·QR) — 목록과 동일 동작 ───────────────
+  const orderUrl = buildOrderUrl(event.order_url_slug);
+  const handleOpenOrder = () => window.open(orderUrl, '_blank');
+  const handleCopyOrderUrl = async () => {
+    const ok = await copyToClipboard(orderUrl);
+    addNotification(
+      ok ? '주문 URL이 클립보드에 복사되었습니다.' : '주문 URL 복사에 실패했습니다.',
+      ok ? 'success' : 'error',
+    );
+  };
+  const handleOpenQr = async () => {
+    try {
+      setQrSvg(await generateOrderQrSvg(orderUrl));
+      setQrOpen(true);
+    } catch {
+      addNotification('QR 코드 생성에 실패했습니다.', 'error');
+    }
+  };
+  const handleDownloadQr = () => {
+    if (!qrSvg) return;
+    downloadQrSvg(qrSvg, event.order_url_slug);
+    addNotification('QR 코드가 다운로드되었습니다.', 'success');
+  };
+
   const revenue = computeRevenueByCategory(orders);
   const hasRevenue = revenue.total > 0;
+  const hasFulfillment = !!fulfillment && fulfillment.total > 0;
   const titleName = event.host_society || event.name;
 
-  const headerAction = (
-    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-      {canEdit && !editingOverview && (
-        <Button
-          size="small" variant="outlined"
-          startIcon={<EditIcon sx={{ fontSize: 16 }} />}
-          onClick={startEditOverview}
-          sx={{ minHeight: 36 }}
-        >
-          학회 정보 수정
-        </Button>
-      )}
-      <Button
-        size="small" variant="outlined"
-        startIcon={<DescriptionIcon sx={{ fontSize: 16 }} />}
-        onClick={handleExportDeposit}
-        disabled={exporting}
-        sx={{ minHeight: 36 }}
-      >
-        {exporting ? '생성중...' : '입금결의서'}
-      </Button>
-      <Button
-        size="small" variant="outlined"
-        startIcon={<ReceiptLongIcon sx={{ fontSize: 16 }} />}
-        onClick={() => setReceiptOpen(true)}
-        sx={{ minHeight: 36 }}
-      >
-        지불증
-      </Button>
-    </Box>
-  );
+  // 헤더 액션 = "학회 정보 수정" 1개만(입금결의서·지불증은 ⑥ 사후 업무 "문서 내보내기"로 이동).
+  const headerAction = canEdit && !editingOverview ? (
+    <Button
+      size="small" variant="outlined"
+      startIcon={<EditIcon sx={{ fontSize: 16 }} />}
+      onClick={startEditOverview}
+      sx={{ minHeight: 36 }}
+    >
+      학회 정보 수정
+    </Button>
+  ) : undefined;
 
   return (
     <Box>
@@ -610,10 +740,13 @@ const EventDetailPage = () => {
         <DiscountChip rate={event.discount_rate} />
       </Box>
 
+      {/* 진행 요약 바 */}
+      <SummaryBar progress={progress} onJump={jumpToStep} />
+
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-        {/* ─── 개요 (읽기 요약 ↔ 편집 폼 모드 스왑) ─── */}
-        <Box ref={overviewRef}>
-          <SectionCard title="개요" icon={EventNoteIcon}>
+        {/* ─── ① 학회 개요 (읽기 요약 ↔ 편집 폼 모드 스왑) ─── */}
+        <Box ref={(el) => { overviewRef.current = el; sectionRefs.current.overview = el; }}>
+          <SectionCard title="학회 개요" icon={EventNoteIcon}>
             {editingOverview && overviewForm ? (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <EventAutofillFields
@@ -672,7 +805,7 @@ const EventDetailPage = () => {
                 <OverviewRow icon={<PersonIcon sx={ROW_ICON_SX} />} label="참석자" alignTop>
                   <AttendeePillRow ids={event.attendee_ids || []} staffMap={staffMap} myId={myId} />
                 </OverviewRow>
-                <OverviewRow icon={<CostIcon sx={ROW_ICON_SX} />} label="비용">
+                <OverviewRow icon={<CostIcon sx={ROW_ICON_SX} />} label="비용" alignTop>
                   <Box>
                     <Typography variant="body2" sx={{ color: event.marketing_cost ? 'text.primary' : 'text.disabled', fontWeight: 600, fontFeatureSettings: '"tnum" 1' }}>
                       {event.marketing_cost ? `${won(event.marketing_cost)}원` : '—'}
@@ -689,214 +822,282 @@ const EventDetailPage = () => {
                     {event.note || '—'}
                   </Typography>
                 </OverviewRow>
+
+                {/* 주문서 행 — 신규(1차). 주소 + 열기·복사·QR */}
+                <OverviewRow icon={<QrCode2Icon sx={ROW_ICON_SX} />} label="주문서" alignTop>
+                  <Box>
+                    <Typography variant="caption" sx={{ color: 'text.secondary', wordBreak: 'break-all', display: 'block', mb: 1, fontFeatureSettings: '"tnum" 1' }}>
+                      {orderUrl}
+                    </Typography>
+                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                      <Button size="small" variant="outlined" startIcon={<OpenInNewIcon sx={{ fontSize: 16 }} />} onClick={handleOpenOrder} sx={{ minHeight: 36 }}>열기</Button>
+                      <Button size="small" variant="outlined" startIcon={<ContentCopyIcon sx={{ fontSize: 16 }} />} onClick={handleCopyOrderUrl} sx={{ minHeight: 36 }}>복사</Button>
+                      <Button size="small" variant="outlined" startIcon={<QrCode2Icon sx={{ fontSize: 16 }} />} onClick={handleOpenQr} sx={{ minHeight: 36 }}>QR</Button>
+                    </Box>
+                  </Box>
+                </OverviewRow>
               </Box>
             )}
           </SectionCard>
         </Box>
 
-        {/* ─── 진행 상태 ─── */}
-        <SectionCard title="진행 상태" icon={EditNoteIcon} subtitle={canEdit ? '칩을 눌러 완료 여부를 표시하세요 (독립 항목)' : undefined}>
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-            <ProgressChip label="기안" done={progress.draft} canEdit={canEdit} onToggle={() => handleToggleProgress('draft', 'draft_done')} />
-            <ProgressChip label="신청" done={progress.application} canEdit={canEdit} onToggle={() => handleToggleProgress('application', 'application_done')} />
-            <ProgressChip label="지결" done={progress.paymentResolution} canEdit={canEdit} onToggle={() => handleToggleProgress('paymentResolution', 'payment_resolution_done')} />
-          </Box>
-        </SectionCard>
+        {/* ─── ②③④ 상신·신청 (완료 체크 행 3개) ─── */}
+        <Box ref={setSectionRef('presubmit')}>
+          <SectionCard title="상신·신청" icon={DescriptionIcon} subtitle={canEdit ? '각 항목을 눌러 완료 여부를 표시하세요 (독립 항목)' : undefined}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <ProgressCheckRow label="기안서 상신" done={progress.draft} canEdit={canEdit} flash={flashStep === 'draft'} onToggle={() => handleToggleProgress('draft', 'draft_done')} />
+              <ProgressCheckRow label="학회 참석 신청" done={progress.application} canEdit={canEdit} flash={flashStep === 'application'} onToggle={() => handleToggleProgress('application', 'application_done')} />
+              <ProgressCheckRow label="부스 참가비 지출결의서 상신" done={progress.paymentResolution} canEdit={canEdit} flash={flashStep === 'paymentResolution'} onToggle={() => handleToggleProgress('paymentResolution', 'payment_resolution_done')} />
+            </Box>
+          </SectionCard>
+        </Box>
 
-        {/* ─── 준비 노트 (통합 에디터) ─── */}
-        <SectionCard
-          title="준비 노트"
-          icon={PrepIcon}
-          subtitle="준비물 체크리스트 · 학회 자료(이미지) · 학회 정보를 한 곳에"
-          action={
-            canEdit && !editingNote ? (
-              <Button
-                size="small" variant="outlined"
-                startIcon={<PrepEditIcon sx={{ fontSize: 16 }} />}
-                onClick={handleEditNote}
-                sx={{ minHeight: 36 }}
-              >
-                편집
-              </Button>
-            ) : undefined
-          }
-        >
-          {editingNote ? (
-            <Box>
-              {noteDraft.hasDraft && (
-                <DraftBanner
-                  savedLabel={noteDraft.savedLabel}
-                  onResume={handleResumeNote}
-                  onDiscard={handleDiscardNote}
+        {/* ─── ⑤ 참석준비 (통합 에디터) ─── */}
+        <Box ref={setSectionRef('prep')}>
+          <SectionCard
+            title="참석준비"
+            icon={PrepIcon}
+            subtitle="준비물 체크리스트 · 학회 자료(이미지) · 설치/철거 안내를 한 곳에"
+            action={
+              canEdit && !editingNote ? (
+                <Button
+                  size="small" variant="outlined"
+                  startIcon={<PrepEditIcon sx={{ fontSize: 16 }} />}
+                  onClick={handleEditNote}
+                  sx={{ minHeight: 36 }}
+                >
+                  편집
+                </Button>
+              ) : undefined
+            }
+          >
+            {editingNote ? (
+              <Box>
+                {noteDraft.hasDraft && (
+                  <DraftBanner
+                    savedLabel={noteDraft.savedLabel}
+                    onResume={handleResumeNote}
+                    onDiscard={handleDiscardNote}
+                  />
+                )}
+                <Suspense fallback={<EditorFallback />}>
+                  <PrepNoteEditor
+                    key={editorKey}
+                    eventId={event.id}
+                    initialValue={noteSeed}
+                    onReady={(getHtml) => { getNoteHtmlRef.current = getHtml; }}
+                    onChange={(html) => noteDraft.saveDraft(html)}
+                    onImageError={(msg) => addNotification(msg, 'warning')}
+                  />
+                </Suspense>
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 2, flexWrap: 'wrap' }}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                    Markdown 탭에서 ## 제목 · - [ ] 체크리스트를 바로 입력할 수 있어요
+                  </Typography>
+                  <DraftSavedHint savedLabel={noteDraft.savedLabel} sx={{ ml: { sm: 'auto' } }} />
+                  <Button size="small" onClick={() => setEditingNote(false)} disabled={savingNote}>취소</Button>
+                  <Button size="small" variant="contained" onClick={handleSaveNote} disabled={savingNote}>
+                    {savingNote ? '저장중...' : '저장'}
+                  </Button>
+                </Box>
+              </Box>
+            ) : event.prep_note ? (
+              <Suspense fallback={<EditorFallback />}>
+                <PrepNoteViewer content={event.prep_note} onImageClick={(src) => setLightboxSrc(src)} />
+              </Suspense>
+            ) : (
+              <EmptyState
+                icon={PrepIcon}
+                title="준비 노트가 비어 있어요"
+                description="준비물 체크리스트, 프로그램·부스 배치도 이미지, 설치·철거 안내 등을 한 곳에 정리하세요"
+                action={canEdit ? { label: '작성하기', onClick: handleEditNote, startIcon: <PrepEditIcon sx={{ fontSize: 16 }} /> } : undefined}
+              />
+            )}
+          </SectionCard>
+        </Box>
+
+        {/* ─── ⑥ 사후 업무 (매출 · 출고 현황 · 현장 보고 · 문서 내보내기) ─── */}
+        <Box ref={setSectionRef('post')}>
+          <SectionCard title="사후 업무" icon={ReportIcon} subtitle="매출 · 출고 현황 · 현장 보고 · 문서 내보내기">
+            {/* 매출 요약 — 항상 표시(지결 연동 해제). 결제 완료 기준. */}
+            <PostSubSection label="매출 요약" caption="결제 완료 주문 기준 · 배송비 포함" first>
+              {hasRevenue ? (
+                <Box>
+                  <Box sx={{ mb: 3, pb: 3, borderBottom: `1px solid ${theme.gray[100]}` }}>
+                    <StatCard
+                      variant="hero"
+                      label="총 매출액"
+                      value={won(revenue.total)}
+                      unit="원"
+                      icon={ReceiptIcon}
+                      color={theme.accent.revenue}
+                    />
+                  </Box>
+                  {/* 검사/도서/도구 3버킷(도구 독립, 2026-06-24). 0원 버킷 숨김 → 1~3열 동적 분할. */}
+                  <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: { xs: 2, sm: 3 } }}>
+                    {[
+                      { key: 'test', label: '검사 판매', revenue: revenue.test, shipping: revenue.testShipping, icon: TestIcon, color: theme.accent.tests },
+                      { key: 'book', label: '도서 판매', revenue: revenue.book, shipping: revenue.bookShipping, icon: BookIcon, color: theme.accent.books },
+                      { key: 'tool', label: '도구 판매', revenue: revenue.tool, shipping: revenue.toolShipping, icon: ToolIcon, color: CATEGORY_COLORS.tool },
+                    ]
+                      .filter(b => b.revenue > 0)
+                      .map(b => (
+                        <Box key={b.key} sx={{ flex: 1, minWidth: 0 }}>
+                          <StatCard
+                            label={`${b.label} (배송비 ${won(b.shipping)}원 포함)`}
+                            value={won(b.revenue)}
+                            unit="원"
+                            icon={b.icon}
+                            color={b.color}
+                          />
+                        </Box>
+                      ))}
+                  </Box>
+                </Box>
+              ) : (
+                <EmptyState
+                  icon={ReceiptIcon}
+                  title="아직 매출이 없어요"
+                  description="결제 완료된 주문이 생기면 여기에 검사·도서·도구 매출이 표시됩니다"
+                  sx={{ py: 4 }}
                 />
               )}
-              <Suspense fallback={<EditorFallback />}>
-                <PrepNoteEditor
-                  key={editorKey}
-                  eventId={event.id}
-                  initialValue={noteSeed}
-                  onReady={(getHtml) => { getNoteHtmlRef.current = getHtml; }}
-                  onChange={(html) => noteDraft.saveDraft(html)}
-                  onImageError={(msg) => addNotification(msg, 'warning')}
+            </PostSubSection>
+
+            {/* 출고 현황 — 매출과 다른 모집단. 합배송 묶음=1건, 현장수령 포함. 2칸(처리 완료·출고 대상). */}
+            <PostSubSection label="출고 현황" caption="결제 완료·처리 완료 주문 기준 · 합배송 묶음은 1건 · 현장수령 포함">
+              {hasFulfillment ? (
+                <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: { xs: 2, sm: 3 } }}>
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <StatCard label="처리 완료" value={fulfillment.completed} unit="건" icon={CheckCircleIcon} color={theme.accent.revenue} />
+                  </Box>
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <StatCard label="출고 대상" value={fulfillment.total} unit="건" icon={ShippingIcon} color={theme.accent.shipping} />
+                  </Box>
+                </Box>
+              ) : (
+                <EmptyState
+                  icon={ShippingIcon}
+                  title="아직 출고 대상 주문이 없어요"
+                  description="결제 완료 주문이 생기면 처리 완료 건수가 표시됩니다"
+                  sx={{ py: 4 }}
                 />
-              </Suspense>
-              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 2, flexWrap: 'wrap' }}>
-                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                  Markdown 탭에서 ## 제목 · - [ ] 체크리스트를 바로 입력할 수 있어요
-                </Typography>
-                <DraftSavedHint savedLabel={noteDraft.savedLabel} sx={{ ml: { sm: 'auto' } }} />
-                <Button size="small" onClick={() => setEditingNote(false)} disabled={savingNote}>취소</Button>
-                <Button size="small" variant="contained" onClick={handleSaveNote} disabled={savingNote}>
-                  {savingNote ? '저장중...' : '저장'}
+              )}
+            </PostSubSection>
+
+            {/* 현장 보고 */}
+            <PostSubSection label="현장 보고">
+              <FieldReportSection
+                eventId={event.id}
+                eventName={event.name}
+                revenueData={{
+                  testRevenue: revenue.test,
+                  bookRevenue: revenue.book,
+                  toolRevenue: revenue.tool,
+                  totalRevenue: revenue.total,
+                  testShipping: revenue.testShipping,
+                  bookShipping: revenue.bookShipping,
+                  toolShipping: revenue.toolShipping,
+                }}
+                canEdit={canEdit}
+              />
+            </PostSubSection>
+
+            {/* 문서 내보내기 — 헤더에서 이동. 입금결의서(L2 유일 진입점) · 지불증. */}
+            <PostSubSection label="문서 내보내기">
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                <Button
+                  size="small" variant="outlined"
+                  startIcon={<DescriptionIcon sx={{ fontSize: 16 }} />}
+                  onClick={handleExportDeposit}
+                  disabled={exporting}
+                  sx={{ minHeight: 40 }}
+                >
+                  {exporting ? '생성중...' : '입금결의서'}
+                </Button>
+                <Button
+                  size="small" variant="outlined"
+                  startIcon={<ReceiptLongIcon sx={{ fontSize: 16 }} />}
+                  onClick={() => setReceiptOpen(true)}
+                  sx={{ minHeight: 40 }}
+                >
+                  지불증
                 </Button>
               </Box>
-            </Box>
-          ) : event.prep_note ? (
-            <Suspense fallback={<EditorFallback />}>
-              <PrepNoteViewer content={event.prep_note} onImageClick={(src) => setLightboxSrc(src)} />
-            </Suspense>
-          ) : (
-            <EmptyState
-              icon={PrepIcon}
-              title="준비 노트가 비어 있어요"
-              description="준비물 체크리스트, 프로그램·부스 배치도 이미지, 설치·철거 안내 등을 한 곳에 정리하세요"
-              action={canEdit ? { label: '작성하기', onClick: handleEditNote, startIcon: <PrepEditIcon sx={{ fontSize: 16 }} /> } : undefined}
-            />
-          )}
-        </SectionCard>
+            </PostSubSection>
+          </SectionCard>
+        </Box>
 
-        {/* ─── 현장 보고 ─── */}
-        <SectionCard title="현장 보고" icon={ReportIcon}>
-          <FieldReportSection
-            eventId={event.id}
-            eventName={event.name}
-            revenueData={{
-              testRevenue: revenue.test,
-              bookRevenue: revenue.book,
-              toolRevenue: revenue.tool,
-              totalRevenue: revenue.total,
-              testShipping: revenue.testShipping,
-              bookShipping: revenue.bookShipping,
-              toolShipping: revenue.toolShipping,
-            }}
-            canEdit={canEdit}
-          />
-        </SectionCard>
-
-        {/* ─── 매출 요약 (지결 완료 시에만) ─── */}
-        <SectionCard
-          title="매출 요약"
-          icon={ReceiptIcon}
-          subtitle={progress.paymentResolution ? '결제 완료 주문 기준 · 배송비 포함' : undefined}
-        >
-          {!progress.paymentResolution ? (
-            <Box
-              sx={{
-                display: 'flex', alignItems: 'center', gap: 1.5,
-                px: 2, py: 2,
-                borderRadius: `${theme.radii.md}px`,
-                bgcolor: theme.gray[50],
-                border: `1px solid ${theme.gray[200]}`,
-              }}
-            >
-              <LockIcon sx={{ fontSize: 20, color: 'text.disabled', flexShrink: 0 }} />
-              <Box>
-                <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>
-                  지결 완료 후 매출이 표시됩니다
-                </Typography>
-                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.25 }}>
-                  진행 상태에서 ‘지결’을 완료로 표시하면 이 학회의 검사·도서 매출이 집계됩니다
-                </Typography>
-              </Box>
-            </Box>
-          ) : hasRevenue ? (
-            <Box>
-              <Box sx={{ mb: 3, pb: 3, borderBottom: `1px solid ${theme.gray[100]}` }}>
-                <StatCard
-                  variant="hero"
-                  label="총 매출액"
-                  value={won(revenue.total)}
-                  unit="원"
-                  icon={ReceiptIcon}
-                  color={theme.accent.revenue}
-                />
-              </Box>
-              {/* 검사/도서/도구 3버킷(도구 독립, 2026-06-24). 0원 버킷 숨김 → 1~3열 동적 분할. */}
-              <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: { xs: 2, sm: 3 } }}>
-                {[
-                  { key: 'test', label: '검사 판매', revenue: revenue.test, shipping: revenue.testShipping, icon: TestIcon, color: theme.accent.tests },
-                  { key: 'book', label: '도서 판매', revenue: revenue.book, shipping: revenue.bookShipping, icon: BookIcon, color: theme.accent.books },
-                  { key: 'tool', label: '도구 판매', revenue: revenue.tool, shipping: revenue.toolShipping, icon: ToolIcon, color: CATEGORY_COLORS.tool },
-                ]
-                  .filter(b => b.revenue > 0)
-                  .map(b => (
-                    <Box key={b.key} sx={{ flex: 1, minWidth: 0 }}>
-                      <StatCard
-                        label={`${b.label} (배송비 ${won(b.shipping)}원 포함)`}
-                        value={won(b.revenue)}
-                        unit="원"
-                        icon={b.icon}
-                        color={b.color}
-                      />
-                    </Box>
-                  ))}
-              </Box>
-            </Box>
-          ) : (
-            <EmptyState
-              icon={ReceiptIcon}
-              title="아직 매출이 없어요"
-              description="결제 완료된 주문이 생기면 여기에 검사·도서 매출이 표시됩니다"
-            />
-          )}
-        </SectionCard>
-
-        {/* ─── 열람 이력 (master만 · 게시판 읽음 현황 패턴) ─── */}
+        {/* ─── 열람 이력 (master만 · 흐름 밖 맨 아래) ─── */}
         {isMaster && Array.isArray(views) && views.length > 0 && (
           <SectionCard title="열람 이력" icon={ViewsIcon} subtitle="이 학회 상세를 연 직원 · 마스터에게만 보여요">
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell sx={{ fontWeight: 700 }}>이름</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>최초 열람</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>최근 열람</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 700 }}>횟수</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {views.map((v) => (
-                    <TableRow key={v.user_id}>
-                      <TableCell>
-                        <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 600 }}>
-                          {v.name || '(삭제)'}
-                          {v.position && (
-                            <Typography component="span" variant="caption" sx={{ color: 'text.secondary', fontWeight: 500, ml: 0.5 }}>
-                              {v.position}
-                            </Typography>
-                          )}
+            {isMobile ? (
+              // 모바일 — 가로 스크롤 금지(건우님 모바일 원칙). 행 단위(이름 + 최근 열람·횟수). 최초 열람 생략.
+              <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                {views.map((v) => (
+                  <Box key={v.user_id} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1, borderBottom: `1px solid ${theme.gray[100]}` }}>
+                    <Typography variant="body2" sx={{ fontWeight: 600, flex: 1, minWidth: 0 }}>
+                      {v.name || '(삭제)'}
+                      {v.position && (
+                        <Typography component="span" variant="caption" sx={{ color: 'text.secondary', fontWeight: 500, ml: 0.5 }}>
+                          {v.position}
                         </Typography>
-                      </TableCell>
-                      <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                        <Typography variant="caption" sx={{ color: 'text.secondary', fontFeatureSettings: '"tnum" 1' }}>
-                          {v.first_viewed_at ? format(new Date(v.first_viewed_at), 'MM.dd HH:mm') : '-'}
-                        </Typography>
-                      </TableCell>
-                      <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                        <Typography variant="caption" sx={{ color: 'text.secondary', fontFeatureSettings: '"tnum" 1' }}>
-                          {v.last_viewed_at ? format(new Date(v.last_viewed_at), 'MM.dd HH:mm') : '-'}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="right">
-                        <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, fontFeatureSettings: '"tnum" 1' }}>
-                          {v.view_count || 0}회
-                        </Typography>
-                      </TableCell>
+                      )}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: 'text.secondary', fontFeatureSettings: '"tnum" 1', whiteSpace: 'nowrap' }}>
+                      최근 {v.last_viewed_at ? format(new Date(v.last_viewed_at), 'MM.dd HH:mm') : '-'}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, fontFeatureSettings: '"tnum" 1', ml: 1, whiteSpace: 'nowrap' }}>
+                      {v.view_count || 0}회
+                    </Typography>
+                  </Box>
+                ))}
+              </Box>
+            ) : (
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700 }}>이름</TableCell>
+                      <TableCell sx={{ fontWeight: 700 }}>최초 열람</TableCell>
+                      <TableCell sx={{ fontWeight: 700 }}>최근 열람</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 700 }}>횟수</TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                  </TableHead>
+                  <TableBody>
+                    {views.map((v) => (
+                      <TableRow key={v.user_id}>
+                        <TableCell>
+                          <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 600 }}>
+                            {v.name || '(삭제)'}
+                            {v.position && (
+                              <Typography component="span" variant="caption" sx={{ color: 'text.secondary', fontWeight: 500, ml: 0.5 }}>
+                                {v.position}
+                              </Typography>
+                            )}
+                          </Typography>
+                        </TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                          <Typography variant="caption" sx={{ color: 'text.secondary', fontFeatureSettings: '"tnum" 1' }}>
+                            {v.first_viewed_at ? format(new Date(v.first_viewed_at), 'MM.dd HH:mm') : '-'}
+                          </Typography>
+                        </TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                          <Typography variant="caption" sx={{ color: 'text.secondary', fontFeatureSettings: '"tnum" 1' }}>
+                            {v.last_viewed_at ? format(new Date(v.last_viewed_at), 'MM.dd HH:mm') : '-'}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, fontFeatureSettings: '"tnum" 1' }}>
+                            {v.view_count || 0}회
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
           </SectionCard>
         )}
       </Box>
@@ -924,6 +1125,16 @@ const EventDetailPage = () => {
         onClose={() => setReceiptOpen(false)}
         event={event}
         staff={staff}
+      />
+
+      {/* 주문서 QR 다이얼로그 (목록·상세 공용) */}
+      <EventQrDialog
+        open={qrOpen}
+        name={event.name}
+        url={orderUrl}
+        qrSvg={qrSvg}
+        onClose={() => setQrOpen(false)}
+        onDownload={handleDownloadQr}
       />
 
       {/* 이미지 라이트박스 */}

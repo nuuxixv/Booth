@@ -36,6 +36,8 @@ const ProductManagementPreview = lazy(() => import('./components/ProductManageme
 const EventManagementPreview = lazy(() => import('./components/EventManagementPreview'));
 const EventHubListPreview = lazy(() => import('./components/EventHubListPreview'));
 const EventDetailPreview = lazy(() => import('./components/EventDetailPreview'));
+const EventDetailFlowPreview = lazy(() => import('./components/EventDetailFlowPreview'));
+const EventHubFoldPreview = lazy(() => import('./components/EventHubFoldPreview'));
 const PaymentReceiptModalPreview = lazy(() => import('./components/PaymentReceiptModalPreview'));
 const UserManagementPreview = lazy(() => import('./components/UserManagementPreview'));
 const BulletinBoardPreview = lazy(() => import('./components/BulletinBoardPreview'));
@@ -75,6 +77,8 @@ function AppRoutes() {
         <Route path="/preview/events" element={<EventManagementPreview />} />
         <Route path="/preview/event-hub" element={<EventHubListPreview />} />
         <Route path="/preview/event-detail" element={<EventDetailPreview />} />
+        <Route path="/preview/event-detail-flow" element={<EventDetailFlowPreview />} />
+        <Route path="/preview/event-hub-fold" element={<EventHubFoldPreview />} />
         <Route path="/preview/payment-receipt" element={<PaymentReceiptModalPreview />} />
         <Route path="/preview/users" element={<UserManagementPreview />} />
         <Route path="/preview/bulletins" element={<BulletinBoardPreview />} />
