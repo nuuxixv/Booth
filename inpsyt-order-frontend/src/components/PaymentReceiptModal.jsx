@@ -464,6 +464,9 @@ const PaymentReceiptModal = ({ open, onClose, event, staff = [] }) => {
     ? `${dot(event.start_date)}${event.end_date ? ` ~ ${dot(event.end_date)}` : ''}`
     : '';
 
+  // 장소 표기 — 신규 저장분은 장소명(+홀·층 상세) 합성, 레거시는 venue 폴백(2026-10-12 2차).
+  const venueLabel = [event?.venue_name, event?.venue_detail].filter(Boolean).join(' ') || event?.venue || '';
+
   return (
     <Dialog
       open={open}
@@ -488,11 +491,11 @@ const PaymentReceiptModal = ({ open, onClose, event, staff = [] }) => {
       <DialogContent dividers sx={{ bgcolor: theme.gray[50] }}>
         <Box sx={{ mt: 0.5, mb: 2, p: 2, borderRadius: `${theme.radii.md}px`, bgcolor: 'background.paper', border: `1px solid ${theme.gray[200]}` }}>
           <Typography variant="subtitle2" sx={{ color: 'text.primary' }}>{event?.name || '행사'}</Typography>
-          {(eventDateRange || event?.venue) && (
+          {(eventDateRange || venueLabel) && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mt: 0.5 }}>
               <EventNoteIcon sx={{ fontSize: 15, color: 'text.disabled' }} />
               <Typography variant="caption" sx={{ color: 'text.secondary', fontFeatureSettings: '"tnum" 1' }}>
-                {eventDateRange}{event?.venue ? ` · ${event.venue}` : ''}
+                {eventDateRange}{venueLabel ? ` · ${venueLabel}` : ''}
               </Typography>
             </Box>
           )}

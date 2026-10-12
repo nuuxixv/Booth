@@ -185,7 +185,7 @@ const EventCreatePage = () => {
         </Box>
       </SectionCard>
 
-      {/* 블록 2 — 선택 항목 6개: 필수 4개 충족 후 노출, 접힘 헤더 */}
+      {/* 블록 2 — 선택 항목 8개: 필수 4개 충족 후 노출, 접힘 헤더 */}
       <Box aria-live="polite">
         {showOptional && (
           <SectionCard padding={0} sx={{ mb: 2 }}>
@@ -202,7 +202,7 @@ const EventCreatePage = () => {
             >
               <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Typography variant="subtitle1" sx={{ color: 'text.primary', lineHeight: 1.3 }}>
-                  선택 항목 6개
+                  선택 항목 8개
                 </Typography>
               </Box>
               <IconButton size="small" aria-label={optionalOpen ? '선택 항목 접기' : '선택 항목 펼치기'}>

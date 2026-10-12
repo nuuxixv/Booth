@@ -14,10 +14,14 @@ export const SEASON_SLUG_MAP = {
 };
 
 // 폼이 관리하는 컬럼만 upsert (L2의 prep_note·진행상태 등 동시 편집 컬럼 오염 방지).
+// 2026-10-12 학회 개선 트랙 2차: setup_time·teardown_time·venue_name·venue_address·venue_detail 추가.
+// 기존 venue는 deprecated 존치(지불증·라운드트립 폴백) — payload에 계속 포함해 기존 값 보존.
+// ★5컬럼은 FORM_FIELDS·emptyEvent·EVENT_DETAIL_COLUMNS·목록 select에 전부 반영해야 함(2026-06-25 값 소거 사고 방지).
 export const FORM_FIELDS = [
   'name', 'discount_rate', 'order_url_slug', 'start_date', 'end_date', 'estimated_delivery_date',
   'event_year', 'host_society', 'event_season', 'venue', 'attendee_ids', 'note', 'marketing_cost',
   'visible_categories',
+  'setup_time', 'teardown_time', 'venue_name', 'venue_address', 'venue_detail',
 ];
 export const DATE_FIELDS = ['start_date', 'end_date', 'estimated_delivery_date'];
 
@@ -26,6 +30,7 @@ export const emptyEvent = () => ({
   estimated_delivery_date: '', event_year: new Date().getFullYear(), host_society: '',
   event_season: '', venue: '', attendee_ids: [], note: '', marketing_cost: null,
   visible_categories: [],
+  setup_time: '', teardown_time: '', venue_name: '', venue_address: '', venue_detail: '',
 });
 
 // 행사 구분 → 영문 slug 조각. 목록 외 직접 입력은 'etc'.

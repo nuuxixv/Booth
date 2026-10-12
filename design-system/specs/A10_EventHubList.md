@@ -2,7 +2,7 @@
 
 > 비전: **"학회 운영 OS — 한 학회의 모든 것이 한 페이지에."**
 > L1 연간 목록(이 문서) → L2 학회 통합 상세(`L2_EventDetail.md` — 1차 시안 완료 2026-06-08) → L3 연차 자산(비-P0)
-> 상태: **1차 구현 완료(2026-10-12, frontend-engineer)** — 종료 접힘·예정 전체 표시 재구성을 실 페이지(`EventManagementPage.jsx`)에 반영. **2차 항목(장소 컬럼 `venue_name||venue` 폴백·목록 select 신규 5컬럼·PageHeader "준비노트 템플릿" 버튼 — DB 변경 필요) 대기.**
+> 상태: **1차+2차 구현 완료(2026-10-12, frontend-engineer)** — 종료 접힘·예정 전체 표시 재구성 + 2차(장소 컬럼 `venue_name||venue` 폴백·목록 select 신규 5컬럼·PageHeader "준비노트 템플릿" 버튼)를 실 페이지(`EventManagementPage.jsx`)에 반영. **2차는 DB 5컬럼 + `prep_note_templates` SQL 적용 후 라이브 확인 대기**(전제 = "SQL 적용 → 프론트 배포" 순서, 런타임 폴백 미구현).
 >
 > **✅ 2026-10-12 재구성 1차 구현 완료.** 시안 `EventHubFoldPreview.jsx`(`/preview/event-hub-fold`)의 레이아웃을 실 페이지(`EventManagementPage.jsx`)에 반영했다. §5·§6·§7·§12는 현재 실 페이지 구조와 일치한다. 반영: 상단(진행 중·예정, `start_date` asc, 연도·기간 무관 전부) + 하단 "종료된 학회 N건" 접힘(기본 접힘·펼치면 `end_date` desc·번호 영역별 1부터) · 기간 필터 기본값 "전체"(종료 영역에만 적용) · 공통 필터(학회명·참석자·"나")는 양 영역 · subtitle 갱신. **"준비노트 템플릿" 헤더 버튼은 2차이므로 제외.**
 > - 재구성 핵심(건우님 2026-10-12 "권장안대로" 승인 · `project_booth_event_flow_track`): ① 진행 중·예정은 상단(날짜 오름차순), **예정은 연도 무관 전부 표시** ② 종료는 하단 **"종료된 학회 N건" 접힘 영역**(기본 접힘·펼치면 최근 종료순) ③ 기간 필터 기본값 "전체" + **상단은 기간 무관 항상 표시, 기간은 종료 영역에만 적용** ④ 2차: 장소 컬럼 `venue_name||venue` 폴백·목록 select 신규 5컬럼 포함 · PageHeader "준비노트 템플릿" 버튼.
@@ -118,6 +118,7 @@ A10은 기존 학회관리 표를 **대체**하므로 아래 전부 보존(누�
 
 ## 11. 결정 이력 (전부 확정)
 - **2026-10-12 — 1차 실 페이지 구현 완료(frontend-engineer).** 시안 `EventHubFoldPreview.jsx` 레이아웃을 `EventManagementPage.jsx`에 반영. ① 단일 표 → **2영역**(상단=진행 중·예정 `start_date` asc·기간 무관 전부 / 하단=종료 "N건" 접힘·기본 접힘·`end_date` desc·번호 영역별 1부터, `EventRow`/`EventMobileCard`/`EventTable` 공통 컴포넌트로 추출). ② 기간 필터 기본값 올해→**전체**(`dateFilter='all'`), 올해=`event_year`(폴백 start 연도)·반기=start 월, **종료 영역에만 적용**(상단은 항상 전부). 공통 필터(학회명·참석자·"나")는 양 영역. 캡션·subtitle(`진행·예정 N건 · 종료 M건 …`)·활성 필터 수(`dateFilter!=='all'`)·필터 해제(전체) 갱신. ③ Upcoming 하이라이트는 상단(post-filter)에서 산출(음영·별표·좌보더 유지). ④ 종료 학회 0건이면 접힘 섹션 숨김, 필터로 0건이면 "종료된 학회 0건"+펼침 시 빈 상태. ⑤ **주문 URL 복사·QR을 공용 `eventUrl`(execCommand 폴백)·`EventQrDialog`로 추출**(상세와 공유, 토스트 문구 동일). **시안 대비 제외:** "준비노트 템플릿" 버튼·"2차 예정" 태그(2차·DB 변경 필요), 목록 select 신규 5컬럼·장소 폴백(2차). realtime·삭제 게이팅·지불증 ⋯·PaymentReceiptModal·SocietyManagementDialog·로딩 스켈레톤·빈 상태 전부 보존.
+- **2026-10-12 — 2차 구현 완료(frontend-engineer, SQL 적용 후 라이브 확인 대기).** ① 목록 fetch select에 신규 5컬럼(`setup_time`·`teardown_time`·`venue_name`·`venue_address`·`venue_detail`) 추가(라운드트립 소거 방지 — A11 §회귀 점검). ② 장소 컬럼(표·모바일 카드) 출처 `venue` → **`venue_name || venue`** 폴백. ③ PageHeader에 **"준비노트 템플릿"(outlined)** 버튼 추가("학회 목록 관리" 옆·"학회 추가" 왼쪽, `events:edit`만) → `PrepNoteTemplateDialog` 오픈(A12). Primary 채움 버튼은 "학회 추가" 1개 유지. **전제 = "SQL 적용 → 프론트 배포" 순서(런타임 폴백 미구현).**
 - 연동=학회관리 표 확장(단일 화면). 정렬=날짜 오름차순, 기본필터=올해.
 - Q1 참석자 후보=**현장마케팅+master**. Q2 Upcoming=**내 참석 다음 1건(master 전체·0건 폴백)**.
 - Q3 진행상태=**표 제외, L2 본문 템플릿으로 이관(논외)**.

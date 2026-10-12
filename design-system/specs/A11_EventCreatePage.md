@@ -234,12 +234,12 @@
 
 > 2026-06-25: `select`에서 컬럼이 빠져 있어, 운영자가 다른 필드만 고쳐 저장해도 `form.<컬럼>===undefined`→빈값으로 덮어써져 **기존 값이 날아간 사고.** 신규 5컬럼을 **FORM_FIELDS·emptyEvent·모든 select에 전부** 넣지 않으면 동일 사고 재발. 5컬럼이 한 곳이라도 빠지면 라운드트립에서 소거된다.
 
-- [ ] **`eventForm.js` `FORM_FIELDS`** — `setup_time`·`teardown_time`·`venue_name`·`venue_address`·`venue_detail` 추가(+ `venue` 유지).
-- [ ] **`eventForm.js` `emptyEvent()`** — 5컬럼 기본값 `''` 추가(+ `venue: ''` 유지).
-- [ ] **`api/events.js` `EVENT_DETAIL_COLUMNS`**(L2 단건 fetch) — 5컬럼 추가(+ `venue` 유지).
-- [ ] **목록 select**(`EventManagementPage.jsx` L1 목록 fetch) — 장소 컬럼 표기에 쓰는 값 포함(아래 A10 반영 요청과 연동). 편집 라운드트립이 목록 데이터로 초기화되는 경로가 있으면 5컬럼 필수.
-- [ ] **`EventOptionalFields.jsx`** — 설치/철거 입력 2칸 + 장소 3입력(장소명·주소검색·홀/층 상세) 위젯 추가. 다음 우편번호 모달 연결.
-- [ ] **`PaymentReceiptModal.jsx`**(L491~495 장소 표기) — `event?.venue` 직참조를 **`[venue_name, venue_detail].filter(Boolean).join(' ') || venue`** 합성으로 교체(신규 저장분은 합성, 레거시는 `venue` 폴백).
+- [x] **`eventForm.js` `FORM_FIELDS`** — `setup_time`·`teardown_time`·`venue_name`·`venue_address`·`venue_detail` 추가(+ `venue` 유지). ✅ 2026-10-12
+- [x] **`eventForm.js` `emptyEvent()`** — 5컬럼 기본값 `''` 추가(+ `venue: ''` 유지). ✅ 2026-10-12
+- [x] **`api/events.js` `EVENT_DETAIL_COLUMNS`**(L2 단건 fetch) — 5컬럼 추가(+ `venue` 유지). ✅ 2026-10-12
+- [x] **목록 select**(`EventManagementPage.jsx` L1 목록 fetch) — 5컬럼 포함 + 장소 컬럼 `venue_name||venue` 폴백. ✅ 2026-10-12
+- [x] **`EventOptionalFields.jsx`** — 설치/철거 입력 2칸 + 장소 3입력(장소명·주소검색·홀/층 상세) 위젯 추가. 다음 우편번호 모달 연결. 입력 폼엔 복사 버튼만. ✅ 2026-10-12
+- [x] **`PaymentReceiptModal.jsx`**(장소 표기) — `event?.venue` 직참조를 **`[venue_name, venue_detail].filter(Boolean).join(' ') || venue`** 합성으로 교체(신규 저장분은 합성, 레거시는 `venue` 폴백). ✅ 2026-10-12
 
 ## 권한별 차이
 
@@ -312,6 +312,7 @@
 
 ## 변경 이력
 
+- **2026-10-12 2차 구현 완료(frontend-engineer) — SQL 적용 후 라이브 확인 대기.** 회귀 점검 6지점 전부 반영: ①`eventForm.js FORM_FIELDS` 14→19(setup_time·teardown_time·venue_name·venue_address·venue_detail + venue 존치) ②`emptyEvent()` 5컬럼 `''` 기본값 ③`api/events.js EVENT_DETAIL_COLUMNS` 5컬럼 추가 ④`EventManagementPage.jsx` 목록 select 5컬럼 추가 + 장소 컬럼 `venue_name||venue` 폴백(표·모바일 카드) ⑤`EventOptionalFields.jsx` 설치/철거 2칸(자유 텍스트) + 장소 3입력(장소명 / 주소=읽기전용+주소검색 `react-daum-postcode` 모달 / 홀·층 상세) + 입력 폼 **복사 버튼만**(지도 없음) + 레거시 안내 helperText + 선택 블록 헤더 "6개"→"8개" ⑥`PaymentReceiptModal.jsx` 장소 = `[venue_name, venue_detail].filter(Boolean).join(' ') || venue`. **공용 `EventOptionalFields` 수정이라 생성 페이지·L2 개요 편집 동시 반영(둘 다 확인).** 단위테스트 추가(FORM_FIELDS 19개·신규 5컬럼+venue payload 보존·빈 문자열 유지). **전제: "SQL 적용 → 프론트 배포" 순서 — 신규 5컬럼이 select에 있는데 DB 미적용이면 PostgREST 42703으로 상세·목록이 깨지므로 런타임 폴백 미구현(의도). 라이브 확인은 SQL 적용 후 메인 Claude.** 주소 검색 onComplete: `roadAddress`→venue_address, `buildingName`→venue_name(비어 있을 때만), 우편번호 미저장.
 - **2026-10-12 학회 개선 트랙 2차(설치/철거 시간 · 장소 구조화)** — 선택 블록에 **설치 시간·철거 시간 2칸(자유 텍스트, 피커 금지)** 추가(6→8 그룹, 13→15). **장소 단일 `venue` → 장소명(`venue_name`)·주소(`venue_address`, `react-daum-postcode`)·홀/층 상세(`venue_detail`) 3입력 분리.** 주소 복사·네이버 지도(웹 URL) 보조 액션. 좌표·우편번호 미저장. DB 5컬럼 추가(CTO 계약), 기존 `venue` deprecated 존치 + `venue_name` 백필(점진 정규화). `FORM_FIELDS` 14→19. **공용 `EventOptionalFields` 수정이라 생성·L2 편집 동시 반영.** ★회귀 점검 체크리스트(6지점) 신설 — 2026-06-25 값 소거 사고 재발 방지. 네이버 지도 딥링크는 "실측 후 확정". 형제 문서 `A12_PrepNoteTemplates.md`. 건우님 "권장안대로" 승인(`project_booth_event_flow_track`).
 - **2026-07-28 편집 이관·공용 폼 추출** — 편집을 `EventFormDialog` 모달에서 **L2 개요 인라인 편집 모드**로 이관, 다이얼로그 폐기(파일 삭제). 폼 이원화 부채 제거: `EventAutofillFields`·`EventRequiredFields`·`EventOptionalFields` 3종 추출(생성=점진노출 / 편집=평면 공유, **EventCreatePage 버전이 정본**). slug 검사 = `useSlugCheck` 훅(`excludeId` 편집 지원). 편집도 4필수 게이트(운영 DB 마찰 0). L1 ⋯메뉴 "수정"→`/admin/events/{slug}?edit=1`(항목 제거 아님, 진입 시 개요 편집 자동 진입+스크롤·param 스트립). slug 변경 비차단 경고 캡션. 삭제(주문건수 확인+확인 다이얼로그)를 L2 편집 푸터로 이식. **backend 무변경.** 생성 페이지는 순수 리팩터(동작·화면 불변).
 - **2026-07-28 프리뷰 QA 5건** — ①직접입력(`manualMode`) 시 자동조립 3필드 숨김 + "자동으로 행사명 만들기" 복귀 링크 ②배송예정일 `DateField clickToOpen`(필드 클릭으로 캘린더, 다른 4개 소비처 무영향) ③선택 블록 현재값 요약 한 줄 제거(계산 코드 포함) ④선택 블록 보조 안내 문장 제거 ⑤★`percentToRate` 0~100 클램프(100% 초과 → 주문가 음수 운영버그, 공용 유틸이라 생성·편집 동시 해결). 필드 13개·정보 구조 불변.

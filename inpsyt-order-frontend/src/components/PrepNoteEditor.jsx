@@ -37,13 +37,16 @@ import { resolveForDisplay, createImageDisplayUrl } from '../utils/prepNoteImage
  *                                 에디터 준비 전/해제 후 호출 시 null 반환 — 저장 가드용)
  *  - onImageError: (msg) => void (검증/업로드 실패 토스트)
  *  - onChange: (html) => void    (본문 변경 시 호출 — 임시저장(useFormDraft) 자동저장 연결용. 선택)
+ *  - disableImage: boolean       (기본 false. 준비노트 템플릿(A12)용 — 툴바 image 제거 +
+ *                                 업로드/붙여넣기/드래그 이미지 거부 + 안내 토스트. 기존 소비처는 미전달=이미지 활성)
  */
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_BYTES = 5 * 1024 * 1024; // 5MB
 const DEFAULT_BUCKET = 'event-images';
+const IMAGE_DISABLED_MSG = '템플릿에는 이미지를 넣을 수 없어요. 이미지는 각 학회의 준비 노트에서 직접 삽입하세요.';
 
-const PrepNoteEditor = ({ eventId, idPrefix, bucket = DEFAULT_BUCKET, initialEditType, initialValue, onReady, onImageError, onChange }) => {
+const PrepNoteEditor = ({ eventId, idPrefix, bucket = DEFAULT_BUCKET, initialEditType, initialValue, onReady, onImageError, onChange, disableImage = false }) => {
   const elRef = useRef(null);
   const instRef = useRef(null);
   // 최신 props를 마운트-1회 훅 안에서 참조하기 위한 ref (에디터 재생성 방지)
@@ -51,6 +54,8 @@ const PrepNoteEditor = ({ eventId, idPrefix, bucket = DEFAULT_BUCKET, initialEdi
   prefixRef.current = idPrefix ?? eventId;
   const bucketRef = useRef(bucket);
   bucketRef.current = bucket;
+  const disableImageRef = useRef(disableImage);
+  disableImageRef.current = disableImage;
   const onImageErrorRef = useRef(onImageError);
   onImageErrorRef.current = onImageError;
   const onReadyRef = useRef(onReady);
@@ -63,6 +68,11 @@ const PrepNoteEditor = ({ eventId, idPrefix, bucket = DEFAULT_BUCKET, initialEdi
 
     const addImageBlobHook = async (blob, callback) => {
       try {
+        // 템플릿(disableImage) — 업로드/붙여넣기/드래그 이미지 모두 거부 + 안내 토스트(A12 §1-5).
+        if (disableImageRef.current) {
+          onImageErrorRef.current?.(IMAGE_DISABLED_MSG);
+          return;
+        }
         const type = blob.type || '';
         if (!ALLOWED_TYPES.includes(type)) {
           onImageErrorRef.current?.('JPG·PNG·WEBP 이미지만 업로드할 수 있어요.');
@@ -117,7 +127,8 @@ const PrepNoteEditor = ({ eventId, idPrefix, bucket = DEFAULT_BUCKET, initialEdi
           ['heading', 'bold', 'italic'],
           ['hr', 'quote'],
           ['ul', 'ol', 'task'],
-          ['image', 'link'],
+          // 템플릿(disableImage) = image 버튼 제거(링크는 유지). A12 §1-5.
+          disableImageRef.current ? ['link'] : ['image', 'link'],
         ],
         events: {
           // 본문 변경 → 호출부 임시저장(useFormDraft) 연결. getHTML은 변경 직후 최신 본문 반환.

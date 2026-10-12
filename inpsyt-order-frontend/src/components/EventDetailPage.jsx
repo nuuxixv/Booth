@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef, Suspense, laz
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box, Typography, Button, IconButton, CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions, useTheme, useMediaQuery,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Menu, MenuItem, ListItemText,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import {
@@ -32,6 +32,9 @@ import {
   ContentCopy as ContentCopyIcon,
   CheckCircleOutline as CheckCircleIcon,
   LocalShippingOutlined as ShippingIcon,
+  ScheduleOutlined as ClockIcon,
+  Map as MapIcon,
+  AutoAwesomeMotion as TemplateIcon,
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import { supabase } from '../supabaseClient';
@@ -43,7 +46,7 @@ import { computeRevenueByCategory } from '../utils/revenueByCategory';
 import { CATEGORY_COLORS } from '../constants/categoryColors';
 import {
   getEventBySlug, updateEventProgress, updateEventPrepNote, getOrdersForEventRevenue,
-  recordEventView, getEventViewers,
+  recordEventView, getEventViewers, getPrepNoteTemplates,
 } from '../api/events';
 import { getFulfillmentOrders, groupLinkedOrders } from '../api/orders';
 import { fulfillmentCounts } from '../utils/fulfillmentCounts';
@@ -325,6 +328,8 @@ const EventDetailPage = () => {
   const { user, profile, hasPermission } = useAuth();
   const { addNotification } = useNotification();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  // 지도 버튼은 터치 기기에서만 노출(현장 태블릿·폰). 너비가 아니라 터치 입력으로 판정(건우님 2026-10-12).
+  const isTouchDevice = useMediaQuery('(hover: none) and (pointer: coarse)');
 
   const canEdit = hasPermission('events:edit');
   const isMaster = hasPermission('master');
@@ -355,6 +360,10 @@ const EventDetailPage = () => {
   const [noteSeed, setNoteSeed] = useState('');
   const [editorKey, setEditorKey] = useState(0);
   const noteDraft = useFormDraft('prepNote', event?.id, { enabled: canEdit && !!event?.id });
+
+  // 준비노트 템플릿(A12) — "템플릿으로 시작" 선택지. 조회 실패/0개면 숨김(페이지는 정상 동작).
+  const [templates, setTemplates] = useState([]);
+  const [templateAnchor, setTemplateAnchor] = useState(null);
 
   // 라이트박스
   const [lightboxSrc, setLightboxSrc] = useState(null);
@@ -433,6 +442,16 @@ const EventDetailPage = () => {
   }, [slug, addNotification]);
 
   useEffect(() => { loadEvent(); }, [loadEvent]);
+
+  // 준비노트 템플릿 목록 — edit자만 필요. 실패 시 빈 배열(="템플릿으로 시작" 숨김, 페이지 정상).
+  useEffect(() => {
+    if (!canEdit) return undefined;
+    let cancelled = false;
+    getPrepNoteTemplates()
+      .then((t) => { if (!cancelled) setTemplates(t); })
+      .catch(() => { if (!cancelled) setTemplates([]); });
+    return () => { cancelled = true; };
+  }, [canEdit]);
 
   // 열람 기록(진입 1회) + master 열람 이력 조회 — 테이블/RPC 미적용 환경이면 조용히 스킵
   const eventId = event?.id || null;
@@ -689,6 +708,28 @@ const EventDetailPage = () => {
     addNotification('QR 코드가 다운로드되었습니다.', 'success');
   };
 
+  // ─── 장소(2차) — 주소 1회 탭 = 도로명 주소만 복사 / 작은 "지도" 버튼(네이버·터치 기기 전용) ──
+  // 장소 행 = 장소명 + 홀·층 상세. 없으면 레거시 venue 폴백.
+  const venueMain = [event.venue_name, event.venue_detail].filter(Boolean).join(' ') || event.venue || '';
+  const handleCopyVenueAddress = async () => {
+    if (!event.venue_address) return;
+    const ok = await copyToClipboard(event.venue_address);
+    addNotification(ok ? '주소를 복사했어요' : '주소 복사에 실패했어요', ok ? 'success' : 'error');
+  };
+  const handleOpenNaverMap = () => {
+    const query = `${event.venue_name || ''} ${event.venue_address || ''}`.trim();
+    window.open(`https://map.naver.com/p/search/${encodeURIComponent(query)}`, '_blank');
+  };
+
+  // ─── "템플릿으로 시작"(A12) — 기존 편집 진입 경로 재사용. 템플릿 주입이 draft보다 우선. ──
+  const handleStartFromTemplate = (template) => {
+    setTemplateAnchor(null);
+    noteDraft.dismiss(); // draft 배너 숨김(템플릿 우선 — §2-4)
+    setNoteSeed(template.body_html || '');
+    setEditorKey((k) => k + 1);
+    setEditingNote(true);
+  };
+
   const revenue = computeRevenueByCategory(orders);
   const hasRevenue = revenue.total > 0;
   const hasFulfillment = !!fulfillment && fulfillment.total > 0;
@@ -792,9 +833,46 @@ const EventDetailPage = () => {
               </Box>
             ) : (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
-                <OverviewRow icon={<PlaceIcon sx={ROW_ICON_SX} />} label="장소">
-                  <Typography variant="body2" sx={{ color: event.venue ? 'text.primary' : 'text.disabled', fontWeight: 500 }}>
-                    {event.venue || '—'}
+                <OverviewRow icon={<PlaceIcon sx={ROW_ICON_SX} />} label="장소" alignTop>
+                  <Box>
+                    <Typography variant="body2" sx={{ color: venueMain ? 'text.primary' : 'text.disabled', fontWeight: 500 }}>
+                      {venueMain || '—'}
+                    </Typography>
+                    {/* 주소 줄 — 1회 탭 = 도로명 주소(venue_address)만 복사. 지도 버튼은 터치 기기에서만 인라인. */}
+                    {event.venue_address && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mt: 0.5 }}>
+                        <Box
+                          role="button"
+                          tabIndex={0}
+                          onClick={handleCopyVenueAddress}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopyVenueAddress(); } }}
+                          sx={{
+                            display: 'inline-flex', alignItems: 'center', gap: 0.5, cursor: 'pointer',
+                            borderRadius: `${theme.radii.sm}px`, px: 0.5, mx: -0.5, minHeight: 32,
+                            '&:hover': { bgcolor: theme.gray[50] },
+                            '&:focus-visible': { outline: 'none', boxShadow: theme.customShadows.focus },
+                          }}
+                        >
+                          <Typography variant="body2" sx={{ color: 'text.secondary' }}>{event.venue_address}</Typography>
+                          <ContentCopyIcon sx={{ fontSize: 14, color: theme.gray[400] }} />
+                        </Box>
+                        {isTouchDevice && (
+                          <Button size="small" variant="text" startIcon={<MapIcon sx={{ fontSize: 16 }} />} onClick={handleOpenNaverMap} sx={{ minHeight: 36, px: 1, color: 'primary.main' }}>
+                            지도
+                          </Button>
+                        )}
+                      </Box>
+                    )}
+                  </Box>
+                </OverviewRow>
+                <OverviewRow icon={<ClockIcon sx={ROW_ICON_SX} />} label="설치 시간">
+                  <Typography variant="body2" sx={{ color: event.setup_time ? 'text.primary' : 'text.disabled', fontWeight: 500 }}>
+                    {event.setup_time || '—'}
+                  </Typography>
+                </OverviewRow>
+                <OverviewRow icon={<ClockIcon sx={ROW_ICON_SX} />} label="철거 시간">
+                  <Typography variant="body2" sx={{ color: event.teardown_time ? 'text.primary' : 'text.disabled', fontWeight: 500 }}>
+                    {event.teardown_time || '—'}
                   </Typography>
                 </OverviewRow>
                 <OverviewRow icon={<EventNoteIcon sx={ROW_ICON_SX} />} label="날짜">
@@ -906,12 +984,24 @@ const EventDetailPage = () => {
                 <PrepNoteViewer content={event.prep_note} onImageClick={(src) => setLightboxSrc(src)} />
               </Suspense>
             ) : (
-              <EmptyState
-                icon={PrepIcon}
-                title="준비 노트가 비어 있어요"
-                description="준비물 체크리스트, 프로그램·부스 배치도 이미지, 설치·철거 안내 등을 한 곳에 정리하세요"
-                action={canEdit ? { label: '작성하기', onClick: handleEditNote, startIcon: <PrepEditIcon sx={{ fontSize: 16 }} /> } : undefined}
-              />
+              // 빈 상태 — 작성하기 + (템플릿 1개 이상·edit자) "템플릿으로 시작". EmptyState 톤 정합.
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', py: 6, px: 2 }}>
+                <Box sx={{ mb: 2, color: 'grey.300', lineHeight: 0 }}><PrepIcon sx={{ fontSize: 48 }} /></Box>
+                <Typography variant="subtitle1" sx={{ color: 'text.primary', mb: 0.5 }}>준비 노트가 비어 있어요</Typography>
+                <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: 360, mb: canEdit ? 2.5 : 0 }}>
+                  준비물 체크리스트, 프로그램·부스 배치도 이미지, 설치·철거 안내 등을 한 곳에 정리하세요
+                </Typography>
+                {canEdit && (
+                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'center' }}>
+                    <Button variant="outlined" startIcon={<PrepEditIcon sx={{ fontSize: 16 }} />} onClick={handleEditNote}>작성하기</Button>
+                    {templates.length > 0 && (
+                      <Button variant="text" startIcon={<TemplateIcon sx={{ fontSize: 16 }} />} onClick={(e) => setTemplateAnchor(e.currentTarget)} sx={{ color: 'text.secondary' }}>
+                        템플릿으로 시작
+                      </Button>
+                    )}
+                  </Box>
+                )}
+              </Box>
             )}
           </SectionCard>
         </Box>
@@ -1136,6 +1226,20 @@ const EventDetailPage = () => {
         onClose={() => setQrOpen(false)}
         onDownload={handleDownloadQr}
       />
+
+      {/* "템플릿으로 시작" — 템플릿 이름 선택 메뉴. 선택 → 기존 편집 진입 경로 재사용(A12 §2-1). */}
+      <Menu anchorEl={templateAnchor} open={Boolean(templateAnchor)} onClose={() => setTemplateAnchor(null)}>
+        {templates.map((t) => (
+          <MenuItem key={t.id} onClick={() => handleStartFromTemplate(t)} sx={{ minHeight: 44 }}>
+            <ListItemText
+              primary={t.name}
+              secondary={`수정 ${dot((t.updated_at || '').slice(0, 10))}`}
+              primaryTypographyProps={{ variant: 'body2', fontWeight: 600 }}
+              secondaryTypographyProps={{ variant: 'caption', sx: { fontFeatureSettings: '"tnum" 1' } }}
+            />
+          </MenuItem>
+        ))}
+      </Menu>
 
       {/* 이미지 라이트박스 */}
       <Dialog

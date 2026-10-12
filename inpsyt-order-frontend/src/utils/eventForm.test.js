@@ -11,6 +11,7 @@ import {
   isRequiredComplete,
   applyAutofill,
   emptyEvent,
+  FORM_FIELDS,
 } from './eventForm';
 
 describe('seasonToEng', () => {
@@ -136,6 +137,47 @@ describe('normalizeEventPayload', () => {
     const out = normalizeEventPayload({ ...emptyEvent(), _nameTouched: true, created_by: 'u1', name: '행사' });
     expect(out).not.toHaveProperty('_nameTouched');
     expect(out).not.toHaveProperty('created_by');
+  });
+});
+
+// 학회 개선 트랙 2차(2026-10-12) — 신규 5컬럼 + venue 라운드트립 소거 방지(2026-06-25 사고 재발 방지).
+describe('2차 신규 컬럼(설치/철거·장소 3분리) 라운드트립', () => {
+  const NEW_COLS = ['setup_time', 'teardown_time', 'venue_name', 'venue_address', 'venue_detail'];
+
+  it('FORM_FIELDS에 신규 5컬럼 + 기존 venue 모두 포함', () => {
+    NEW_COLS.forEach((k) => expect(FORM_FIELDS).toContain(k));
+    expect(FORM_FIELDS).toContain('venue');
+    expect(FORM_FIELDS).toHaveLength(19);
+  });
+
+  it('emptyEvent 기본값 — 신규 5컬럼 "" · venue "" 존치', () => {
+    const e = emptyEvent();
+    NEW_COLS.forEach((k) => expect(e[k]).toBe(''));
+    expect(e.venue).toBe('');
+  });
+
+  it('normalizeEventPayload가 신규 5컬럼과 venue 값을 payload에 보존', () => {
+    const form = {
+      ...emptyEvent(),
+      setup_time: '당일 07:30 쯤',
+      teardown_time: '둘째 날 13시 이후',
+      venue_name: '부산 BEXCO',
+      venue_address: '부산광역시 해운대구 APEC로 55',
+      venue_detail: '제1전시장 3층 3A홀',
+      venue: '부산 BEXCO 제1전시장',
+    };
+    const out = normalizeEventPayload(form);
+    expect(out.setup_time).toBe('당일 07:30 쯤');
+    expect(out.teardown_time).toBe('둘째 날 13시 이후');
+    expect(out.venue_name).toBe('부산 BEXCO');
+    expect(out.venue_address).toBe('부산광역시 해운대구 APEC로 55');
+    expect(out.venue_detail).toBe('제1전시장 3층 3A홀');
+    expect(out.venue).toBe('부산 BEXCO 제1전시장'); // deprecated 존치 — 저장 payload에 계속 포함
+  });
+
+  it('빈 문자열 신규 컬럼은 그대로 "" 저장(별도 null 정규화 없음)', () => {
+    const out = normalizeEventPayload(emptyEvent());
+    NEW_COLS.forEach((k) => expect(out[k]).toBe(''));
   });
 });
 

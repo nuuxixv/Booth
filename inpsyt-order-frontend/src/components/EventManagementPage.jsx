@@ -47,6 +47,7 @@ import {
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
   HistoryToggleOff as HistoryIcon,
+  AutoAwesomeMotion as TemplateIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
@@ -56,6 +57,7 @@ import { getTodayKST, getEventStatusKST } from '../utils/date';
 import { buildOrderUrl, copyToClipboard, generateOrderQrSvg, downloadQrSvg } from '../utils/eventUrl';
 import TableSkeleton from './TableSkeleton';
 import SocietyManagementDialog from './SocietyManagementDialog';
+import PrepNoteTemplateDialog from './PrepNoteTemplateDialog';
 import PaymentReceiptModal from './PaymentReceiptModal';
 import EventQrDialog from './EventQrDialog';
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from './ui';
@@ -213,11 +215,11 @@ const EventRow = ({ index, event, isUpcoming, staffMap, myId, onOpenMenu, onRowC
         )}
       </TableCell>
       <TableCell sx={{ minWidth: 140 }}>
-        {event.venue ? (
+        {(event.venue_name || event.venue) ? (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <PlaceIcon sx={{ fontSize: 15, color: 'text.disabled', flexShrink: 0 }} />
             <Typography variant="body2" sx={{ color: ended ? 'text.secondary' : 'text.primary' }}>
-              {event.venue}
+              {event.venue_name || event.venue}
             </Typography>
           </Box>
         ) : (
@@ -299,7 +301,7 @@ const EventMobileCard = ({ event, isUpcoming, staffMap, myId, onOpenMenu, onRowC
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
           <PlaceIcon sx={{ fontSize: 15, color: 'text.disabled', flexShrink: 0 }} />
-          <Typography variant="body2" sx={{ color: 'text.secondary' }}>{event.venue || '—'}</Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>{event.venue_name || event.venue || '—'}</Typography>
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.75 }}>
           <PersonIcon sx={{ fontSize: 15, color: 'text.disabled', flexShrink: 0, mt: 0.25 }} />
@@ -361,6 +363,7 @@ const EventManagementPage = () => {
   const [loading, setLoading] = useState(false);
 
   const [societyModalOpen, setSocietyModalOpen] = useState(false);
+  const [prepTemplateOpen, setPrepTemplateOpen] = useState(false);
   // ⋯ 메뉴 경유 삭제 확인
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -389,7 +392,7 @@ const EventManagementPage = () => {
       const [eventsRes, staffRes] = await Promise.all([
         supabase
           .from('events')
-          .select('id, name, discount_rate, order_url_slug, start_date, end_date, estimated_delivery_date, event_year, host_society, event_season, status, venue, attendee_ids, note, marketing_cost, created_by, visible_categories')
+          .select('id, name, discount_rate, order_url_slug, start_date, end_date, estimated_delivery_date, event_year, host_society, event_season, status, venue, attendee_ids, note, marketing_cost, created_by, visible_categories, setup_time, teardown_time, venue_name, venue_address, venue_detail')
           .order('start_date', { ascending: true }),
         supabase
           .from('user_profiles')
@@ -574,6 +577,11 @@ const EventManagementPage = () => {
       {canEdit && (
         <Button variant="outlined" startIcon={<SettingsIcon />} onClick={() => setSocietyModalOpen(true)}>
           학회 목록 관리
+        </Button>
+      )}
+      {canEdit && (
+        <Button variant="outlined" startIcon={<TemplateIcon />} onClick={() => setPrepTemplateOpen(true)}>
+          준비노트 템플릿
         </Button>
       )}
       {canEdit && (
@@ -833,6 +841,11 @@ const EventManagementPage = () => {
         open={societyModalOpen}
         onClose={() => setSocietyModalOpen(false)}
         onUpdated={fetchEvents}
+      />
+
+      <PrepNoteTemplateDialog
+        open={prepTemplateOpen}
+        onClose={() => setPrepTemplateOpen(false)}
       />
 
       {/* QR 다이얼로그 (목록·상세 공용) */}
