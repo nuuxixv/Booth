@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeCategory, buildGroupMetaMap, groupTestProducts, productMatchesEventTags, productMatchesSubCategory, shouldShowCategoryChips } from './testGroupDisplay';
+import { normalizeCategory, buildGroupMetaMap, groupTestProducts, productMatchesEventTags, productMatchesSubCategory, shouldShowCategoryChips, resolvePopularFilter } from './testGroupDisplay';
 
 const master = [
   { id: 1, abbr: 'K·BASC-3', name: '한국판 정서-행동 평가시스템', sort_order: 1, is_active: true },
@@ -184,5 +184,61 @@ describe('productMatchesEventTags', () => {
   it('상품 tags 부재/비배열도 안전하게 false', () => {
     expect(productMatchesEventTags({}, ['A'])).toBe(false);
     expect(productMatchesEventTags({ tags: null }, ['A'])).toBe(false);
+  });
+});
+
+// 인기 탭 술어 — 행사 단위 3단 폴백(tier1 태그∧인기 / tier2 태그 / tier3 인기).
+describe('resolvePopularFilter', () => {
+  const TAG = ['대한신경정신의학회'];
+  const tagPopular = { id: 1, tags: ['대한신경정신의학회'], is_popular: true };
+  const tagOnly = { id: 2, tags: ['대한신경정신의학회'], is_popular: false };
+  const popularOnly = { id: 3, tags: ['무관학회'], is_popular: true };
+  const neither = { id: 4, tags: ['무관학회'], is_popular: false };
+
+  it('tier1: 태그∧인기가 있으면 태그∧인기만 통과(태그만·인기만은 제외)', () => {
+    const f = resolvePopularFilter([tagPopular, tagOnly, popularOnly, neither], TAG);
+    expect(f(tagPopular)).toBe(true);
+    expect(f(tagOnly)).toBe(false);
+    expect(f(popularOnly)).toBe(false);
+    expect(f(neither)).toBe(false);
+  });
+
+  it('tier2: 태그∧인기=0이지만 태그 상품이 있으면 태그 매칭 전부 통과(소아청소년과학회 케이스)', () => {
+    const f = resolvePopularFilter([tagOnly, popularOnly, neither], TAG);
+    expect(f(tagOnly)).toBe(true);
+    expect(f(popularOnly)).toBe(false); // 태그 불일치
+    expect(f(neither)).toBe(false);
+  });
+
+  it('tier3: 태그 매칭 상품이 0이면 is_popular만 통과(현행)', () => {
+    const f = resolvePopularFilter([popularOnly, neither], TAG);
+    expect(f(popularOnly)).toBe(true);
+    expect(f(neither)).toBe(false);
+  });
+
+  it('eventTags=[]이면 tier3(어드민 피커·태그 없는 행사)', () => {
+    const f = resolvePopularFilter([tagPopular, tagOnly, popularOnly, neither], []);
+    expect(f(tagPopular)).toBe(true); // is_popular
+    expect(f(tagOnly)).toBe(false);
+    expect(f(popularOnly)).toBe(true); // is_popular
+    expect(f(neither)).toBe(false);
+  });
+
+  it('products=[]·null·undefined여도 throw하지 않고 tier3 술어 반환', () => {
+    expect(() => resolvePopularFilter([], TAG)).not.toThrow();
+    expect(() => resolvePopularFilter(null, TAG)).not.toThrow();
+    expect(() => resolvePopularFilter(undefined)).not.toThrow();
+    const f = resolvePopularFilter(null, TAG);
+    expect(f(tagPopular)).toBe(true); // is_popular
+    expect(f(neither)).toBe(false);
+  });
+
+  it('검사군 단위: options.some(filter)에서 옵션 하나만 태그∧인기여도 검사군 노출', () => {
+    const base = [tagPopular, tagOnly, popularOnly, neither];
+    const f = resolvePopularFilter(base, TAG); // tier1
+    const group = { options: [tagOnly, tagPopular] }; // 옵션 중 하나(tagPopular)만 태그∧인기
+    const groupNoMatch = { options: [tagOnly, popularOnly] };
+    expect(group.options.some(f)).toBe(true);
+    expect(groupNoMatch.options.some(f)).toBe(false);
   });
 });

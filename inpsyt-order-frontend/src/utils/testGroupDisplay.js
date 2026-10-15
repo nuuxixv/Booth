@@ -18,6 +18,18 @@ export function productMatchesEventTags(product, eventTags = []) {
   return Array.isArray(product.tags) && product.tags.some((t) => eventTags.includes(t));
 }
 
+// 인기 탭 술어 — 행사 단위 3단 폴백. 인기 탭에서만 태그∧인기로 거른다(전체·신규 탭은 정렬만).
+// 교집합이 비면 단계적으로 느슨하게: tier1 태그∧인기 / tier2 태그 상품 전부 / tier3 인기 전체(현행).
+// 판정은 행사 전체(baseProducts) 기준 1회 — 카테고리 칩 선택과 무관(특정 칩에서 비면 빈 상태 안내가 맞다).
+// eventTags 비면(어드민 피커·태그 없는 행사) 항상 tier3로 떨어져 현행과 동일. products null도 throw 안 함.
+export function resolvePopularFilter(products, eventTags = []) {
+  const list = products || [];
+  const matchTag = (p) => productMatchesEventTags(p, eventTags);
+  if (list.some((p) => matchTag(p) && p.is_popular)) return (p) => matchTag(p) && !!p.is_popular;
+  if (list.some((p) => matchTag(p))) return (p) => matchTag(p);
+  return (p) => !!p.is_popular;
+}
+
 // 상품이 특정 소분류(sub_category)에 속하는지 — 미지정은 '기타' 폴백.
 // 단일 대분류 행사의 소분류 칩 필터에 사용. 평면 상품·검사군 옵션 양쪽에서 재사용
 // (폴백 규칙 복붙 금지, 단일 소스).
