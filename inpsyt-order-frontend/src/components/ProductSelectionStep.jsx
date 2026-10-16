@@ -11,7 +11,7 @@ import { fetchAllProducts } from '../api/products';
 import { fetchTestGroups } from '../api/testGroups';
 import { useNotification } from '../hooks/useNotification';
 import { matchesSearch } from '../utils/search';
-import { normalizeCategory, buildGroupMetaMap, groupTestProducts, productMatchesEventTags, productMatchesSubCategory, shouldShowCategoryChips } from '../utils/testGroupDisplay';
+import { normalizeCategory, buildGroupMetaMap, groupTestProducts, productMatchesEventTags, productMatchesSubCategory, shouldShowCategoryChips, resolvePopularFilter } from '../utils/testGroupDisplay';
 import ProductCard from './ProductCard';
 import TestGroupCard from './TestGroupCard';
 import ProductSearchBar from './ProductSearchBar';
@@ -112,6 +112,10 @@ const ProductSelectionStep = ({ cart, onCartChange, discountRate = 0, eventTags 
 
   const hasSearch = Boolean(debouncedSearch.trim());
 
+  // 인기 탭 술어 — 행사 전체(baseProducts) 기준 3단 폴백(tier1 태그∧인기 / tier2 태그 / tier3 인기)을
+  // 한 번만 계산한다. 카테고리 칩 선택과 무관 — 특정 칩에서 결과가 비면 기존 빈 상태 안내가 뜬다.
+  const popularFilter = useMemo(() => resolvePopularFilter(baseProducts, eventTags), [baseProducts, eventTags]);
+
   // 검사군 카테고리 필터 — 평면(filteredProducts)의 카테고리 필터와 대칭. 검색·뷰모드와
   // 무관하게 항상 적용(평면 쪽 카테고리 필터가 검색과 무관하게 늘 걸리는 것과 동일 규칙).
   // - 단일 대분류 행사: 소분류(sub_category) 기준. 옵션 중 하나라도 일치하는 검사군만 노출.
@@ -132,12 +136,13 @@ const ProductSelectionStep = ({ cart, onCartChange, discountRate = 0, eventTags 
   const filteredGroups = useMemo(() => {
     let groups = categoryFilteredGroups;
 
-    // 학회 태그는 '필터'가 아니라 '정렬'로 일원화(태그 없는 상품도 숨기지 않고 아래로).
+    // 학회 태그는 전체·신규 탭에선 '정렬'로만 쓴다(태그 없는 상품도 숨기지 않고 아래로).
+    // 인기 탭만 태그∧인기 필터(popularFilter, 행사 단위 3단 폴백) — 2026-08-18 결정의 인기 탭 한정 조정.
     // 정렬은 testGroups(=groupTestProducts) 단계에서 eventTags 기준으로 이미 적용됨.
 
     // 뷰 모드(검색 중엔 무시) — 그룹 내 하나라도 매칭이면 노출
     if (!hasSearch) {
-      if (viewMode === 'popular') groups = groups.filter(g => g.options.some(p => p.is_popular));
+      if (viewMode === 'popular') groups = groups.filter(g => g.options.some(popularFilter));
       else if (viewMode === 'new') groups = groups.filter(g => g.options.some(p => p.is_new));
     }
 
@@ -153,7 +158,7 @@ const ProductSelectionStep = ({ cart, onCartChange, discountRate = 0, eventTags 
     }
 
     return groups;
-  }, [categoryFilteredGroups, hasSearch, viewMode, debouncedSearch]);
+  }, [categoryFilteredGroups, hasSearch, viewMode, debouncedSearch, popularFilter]);
 
   // 검색 매칭된 검사군 id 집합 — 자동 펼침 판정용
   const searchMatchedGroupIds = useMemo(() => {
@@ -165,7 +170,8 @@ const ProductSelectionStep = ({ cart, onCartChange, discountRate = 0, eventTags 
   const filteredProducts = useMemo(() => {
     let list = flatProducts;
 
-    // 학회 태그는 '필터'가 아니라 '정렬'로 일원화 — 아래 sort에서 태그매칭을 최우선으로.
+    // 학회 태그는 전체·신규 탭에선 '정렬'로만 — 아래 sort에서 태그매칭을 최우선으로.
+    // 인기 탭만 태그∧인기 필터(popularFilter, 행사 단위 3단 폴백) — 2026-08-18 결정의 인기 탭 한정 조정.
 
     // 카테고리
     if (selectedCategory !== 'all') {
@@ -177,7 +183,7 @@ const ProductSelectionStep = ({ cart, onCartChange, discountRate = 0, eventTags 
     }
 
     if (!hasSearch) {
-      if (viewMode === 'popular') list = list.filter(p => p.is_popular);
+      if (viewMode === 'popular') list = list.filter(popularFilter);
       else if (viewMode === 'new') list = list.filter(p => p.is_new);
     }
 
@@ -193,7 +199,7 @@ const ProductSelectionStep = ({ cart, onCartChange, discountRate = 0, eventTags 
       if (popDiff !== 0) return popDiff;
       return (a.name || '').localeCompare(b.name || '');
     });
-  }, [flatProducts, debouncedSearch, viewMode, selectedCategory, eventTags, isSingleCategory, hasSearch]);
+  }, [flatProducts, debouncedSearch, viewMode, selectedCategory, eventTags, isSingleCategory, hasSearch, popularFilter]);
 
   // 필터 변경 시 페이지 리셋
   useEffect(() => {
