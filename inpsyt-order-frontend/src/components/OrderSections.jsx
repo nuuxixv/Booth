@@ -547,9 +547,13 @@ const OrderSections = ({
             value={(
               <FormControl size="small" fullWidth>
                 <Select value={currentStatus} onChange={(e) => handleStatusSelect(e.target.value)} disabled={!canEdit}>
-                  {statusToKorean && Object.entries(statusToKorean).map(([key, value]) => (
-                    <MenuItem key={key} value={key}>{value}</MenuItem>
-                  ))}
+                  {/* preparing(준비중)은 PIN 주문에서만 생기는 상태라 수동 선택지에서 뺀다.
+                      현재 상태가 준비중일 때만 표시용으로 남긴다(Select가 현재 값을 그려야 함). */}
+                  {statusToKorean && Object.entries(statusToKorean)
+                    .filter(([key]) => key !== 'preparing' || currentStatus === 'preparing')
+                    .map(([key, value]) => (
+                      <MenuItem key={key} value={key}>{value}</MenuItem>
+                    ))}
                 </Select>
               </FormControl>
             )}

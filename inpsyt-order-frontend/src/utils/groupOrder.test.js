@@ -78,6 +78,15 @@ describe('selectableOrderIds', () => {
   it('빈 입력 방어', () => {
     expect(selectableOrderIds()).toEqual([]);
   });
+
+  it('preparing(준비중) 주문은 일괄 선택에서 제외', () => {
+    const orders = [
+      { id: 300, status: 'pending' },
+      { id: 301, status: 'preparing' }, // 현장 도움·미완료 → 제외
+      { id: 302, status: 'paid' },
+    ];
+    expect(selectableOrderIds(orders)).toEqual([300, 302]);
+  });
 });
 
 describe('partitionBulkSelectable (일괄 변경 최종 가드)', () => {
