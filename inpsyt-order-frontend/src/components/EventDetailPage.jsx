@@ -34,6 +34,7 @@ import {
   ScheduleOutlined as ClockIcon,
   Map as MapIcon,
   AutoAwesomeMotion as TemplateIcon,
+  WarningAmberOutlined as WarningIcon,
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import { supabase } from '../supabaseClient';
@@ -49,7 +50,7 @@ import {
 } from '../api/events';
 import { getFulfillmentOrders, groupLinkedOrders } from '../api/orders';
 import { fulfillmentCounts } from '../utils/fulfillmentCounts';
-import { fetchProductCountByCategory } from '../api/products';
+import { fetchProductCountByCategory, getProductCategoriesByIds } from '../api/products';
 import { applyAutofill, normalizeEventPayload, isRequiredComplete } from '../utils/eventForm';
 import { useSlugCheck } from '../hooks/useSlugCheck';
 import { encodeForStorage } from '../utils/prepNoteImages';
@@ -303,11 +304,14 @@ const ProgressCheckRow = ({ label, done, canEdit, flash, onToggle }) => {
 };
 
 // ─── 사후 업무 하위 블록(카드 안 카드 금지 — 라벨+구분선으로 구획) ──
-const PostSubSection = ({ label, caption, first, children }) => {
+const PostSubSection = ({ label, caption, first, action, children }) => {
   const theme = useTheme();
   return (
     <Box sx={{ mt: first ? 0 : 3, pt: first ? 0 : 3, borderTop: first ? 'none' : `1px solid ${theme.gray[100]}` }}>
-      <Typography variant="subtitle2" sx={{ color: 'text.primary', mb: caption ? 0.25 : 1.5 }}>{label}</Typography>
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1, mb: caption ? 0.25 : 1.5, flexWrap: 'wrap' }}>
+        <Typography variant="subtitle2" sx={{ color: 'text.primary' }}>{label}</Typography>
+        {action}
+      </Box>
       {caption && <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>{caption}</Typography>}
       {children}
     </Box>
@@ -346,6 +350,8 @@ const EventDetailPage = () => {
 
   // 매출
   const [orders, setOrders] = useState([]);
+  // 미분류 보강 — order_items.category가 빈 품목의 product_id → products.category 조회본.
+  const [productsMap, setProductsMap] = useState({});
 
   // 출고 현황 — { total, completed, pending } | null(미조회/실패 → 빈 상태 graceful)
   const [fulfillment, setFulfillment] = useState(null);
@@ -425,7 +431,16 @@ const EventDetailPage = () => {
       try {
         const ords = await getOrdersForEventRevenue(ev.id);
         setOrders(ords);
-      } catch { setOrders([]); }
+        // 미분류 보강 — category 빈 품목의 product_id만 조회(없으면 조회 생략).
+        const missingIds = [];
+        for (const o of ords) {
+          for (const it of o.order_items || []) {
+            if (!it.category && it.product_id) missingIds.push(it.product_id);
+          }
+        }
+        try { setProductsMap(missingIds.length ? await getProductCategoriesByIds(missingIds) : {}); }
+        catch { setProductsMap({}); }
+      } catch { setOrders([]); setProductsMap({}); }
 
       // 출고 현황 — 출고 관리와 동일 규칙(paid+completed · 합배송 껍데기=1건). 매출과 모집단 다름.
       try {
@@ -670,13 +685,23 @@ const EventDetailPage = () => {
     try {
       const data = await getOrdersForEventRevenue(event.id);
       const { exportDepositResolution } = await import('../utils/depositResolution');
-      await exportDepositResolution({
+      const result = await exportDepositResolution({
         event,
         orders: data,
+        productsMap,
         authorName: profile?.name || '',
         department: profile?.department || '',
       });
-      addNotification('입금결의서를 내보냈습니다.', 'success');
+      // exportDepositResolution이 unclassified를 반환하면(집계 외 매출) 경고. 미반환이면 0으로 방어.
+      const unclassified = result?.unclassified ?? 0;
+      if (unclassified > 0) {
+        addNotification(
+          `미분류 매출 ${won(unclassified)}원이 있어 적요 합계와 계가 다를 수 있습니다. 상품 카테고리를 확인하세요.`,
+          'warning',
+        );
+      } else {
+        addNotification('입금결의서를 내보냈습니다.', 'success');
+      }
     } catch (e) {
       console.error(e);
       addNotification(`입금결의서 내보내기 실패: ${e.message}`, 'error');
@@ -730,7 +755,7 @@ const EventDetailPage = () => {
     setEditingNote(true);
   };
 
-  const revenue = computeRevenueByCategory(orders);
+  const revenue = computeRevenueByCategory(orders, { productsMap });
   const hasRevenue = revenue.total > 0;
   const hasFulfillment = !!fulfillment && fulfillment.total > 0;
   const titleName = event.host_society || event.name;
@@ -1008,11 +1033,73 @@ const EventDetailPage = () => {
           </SectionCard>
         </Box>
 
-        {/* ─── ⑥ 사후 업무 (매출 · 출고 현황 · 현장 보고 · 문서 내보내기) ─── */}
+        {/* ─── ⑥ 사후 업무 (01 보고 → 02 매출 요약, 2026-10-19 개편) ─── */}
         <Box ref={setSectionRef('post')}>
-          <SectionCard title="사후 업무" icon={ReportIcon} subtitle="매출 · 출고 현황 · 현장 보고 · 문서 내보내기">
-            {/* 매출 요약 — 항상 표시(지결 연동 해제). 결제 완료 기준. */}
-            <PostSubSection label="매출 요약" caption="결제 완료 주문 기준 · 배송비 포함" first>
+          <SectionCard title="사후 업무" icon={ReportIcon} subtitle="보고 · 매출 요약">
+            {/* 01 보고 — 현장 보고(일차별 접이식·제자리 편집·복사·금액 업데이트) */}
+            <PostSubSection label="01 보고" first>
+              <FieldReportSection
+                eventId={event.id}
+                eventName={event.name}
+                revenueData={{
+                  testRevenue: revenue.test,
+                  bookRevenue: revenue.book,
+                  toolRevenue: revenue.tool,
+                  totalRevenue: revenue.total,
+                  testShipping: revenue.testShipping,
+                  bookShipping: revenue.bookShipping,
+                  toolShipping: revenue.toolShipping,
+                }}
+                canEdit={canEdit}
+                orders={orders}
+                eventStartDate={event.start_date}
+                eventEndDate={event.end_date}
+                productsMap={productsMap}
+              />
+            </PostSubSection>
+
+            {/* 02 매출 요약 — 항상 표시(지결 연동 해제). 입금결의서·지불증 블록 액션. 출고 현황 흡수. */}
+            <PostSubSection
+              label="02 매출 요약"
+              caption="결제 완료 주문 기준 · 배송비 포함"
+              action={(
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                  <Button
+                    size="small" variant="outlined"
+                    startIcon={<DescriptionIcon sx={{ fontSize: 16 }} />}
+                    onClick={handleExportDeposit}
+                    disabled={exporting}
+                    sx={{ minHeight: 36 }}
+                  >
+                    {exporting ? '생성중...' : '입금결의서'}
+                  </Button>
+                  <Button
+                    size="small" variant="outlined"
+                    startIcon={<ReceiptLongIcon sx={{ fontSize: 16 }} />}
+                    onClick={() => setReceiptOpen(true)}
+                    sx={{ minHeight: 36 }}
+                  >
+                    지불증
+                  </Button>
+                </Box>
+              )}
+            >
+              {/* 미분류 경고 — 합계가 버킷 합과 어긋남(입금결의서 경고와 같은 조건·금액). */}
+              {revenue.unclassified > 0 && (
+                <Box
+                  sx={{
+                    mb: 2, p: 1.5, display: 'flex', gap: 1, alignItems: 'flex-start',
+                    bgcolor: alpha(theme.accent.attention, 0.08),
+                    border: `1px solid ${alpha(theme.accent.attention, 0.3)}`,
+                    borderRadius: `${theme.radii.sm}px`,
+                  }}
+                >
+                  <WarningIcon sx={{ fontSize: 18, color: theme.accent.attention, mt: '1px' }} />
+                  <Typography variant="caption" sx={{ color: 'text.secondary', lineHeight: 1.6 }}>
+                    카테고리를 알 수 없는 매출 {won(revenue.unclassified)}원이 있어 검사·도서·도구 합계가 총 매출액과 다릅니다.
+                  </Typography>
+                </Box>
+              )}
               {hasRevenue ? (
                 <Box>
                   <Box sx={{ mb: 3, pb: 3, borderBottom: `1px solid ${theme.gray[100]}` }}>
@@ -1054,67 +1141,30 @@ const EventDetailPage = () => {
                   sx={{ py: 4 }}
                 />
               )}
-            </PostSubSection>
 
-            {/* 출고 현황 — 매출과 다른 모집단. 합배송 묶음=1건, 현장수령 포함. 2칸(처리 완료·출고 대상). */}
-            <PostSubSection label="출고 현황" caption="결제 완료·처리 완료 주문 기준 · 합배송 묶음은 1건 · 현장수령 포함">
-              {hasFulfillment ? (
-                <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: { xs: 2, sm: 3 } }}>
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <StatCard label="처리 완료" value={fulfillment.completed} unit="건" icon={CheckCircleIcon} color={theme.accent.revenue} />
+              {/* 출고 현황 — 매출과 다른 모집단(합배송 묶음=1건·현장수령 포함). 블록 안 아래쪽. */}
+              <Box sx={{ mt: 3, pt: 3, borderTop: `1px solid ${theme.gray[100]}` }}>
+                <Typography variant="subtitle2" sx={{ color: 'text.primary', mb: 0.25 }}>출고 현황</Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
+                  결제 완료·처리 완료 주문 기준 · 합배송 묶음은 1건 · 현장수령 포함
+                </Typography>
+                {hasFulfillment ? (
+                  <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: { xs: 2, sm: 3 } }}>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <StatCard label="처리 완료" value={fulfillment.completed} unit="건" icon={CheckCircleIcon} color={theme.accent.revenue} />
+                    </Box>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <StatCard label="출고 대상" value={fulfillment.total} unit="건" icon={ShippingIcon} color={theme.accent.shipping} />
+                    </Box>
                   </Box>
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <StatCard label="출고 대상" value={fulfillment.total} unit="건" icon={ShippingIcon} color={theme.accent.shipping} />
-                  </Box>
-                </Box>
-              ) : (
-                <EmptyState
-                  icon={ShippingIcon}
-                  title="아직 출고 대상 주문이 없어요"
-                  description="결제 완료 주문이 생기면 처리 완료 건수가 표시됩니다"
-                  sx={{ py: 4 }}
-                />
-              )}
-            </PostSubSection>
-
-            {/* 현장 보고 */}
-            <PostSubSection label="현장 보고">
-              <FieldReportSection
-                eventId={event.id}
-                eventName={event.name}
-                revenueData={{
-                  testRevenue: revenue.test,
-                  bookRevenue: revenue.book,
-                  toolRevenue: revenue.tool,
-                  totalRevenue: revenue.total,
-                  testShipping: revenue.testShipping,
-                  bookShipping: revenue.bookShipping,
-                  toolShipping: revenue.toolShipping,
-                }}
-                canEdit={canEdit}
-              />
-            </PostSubSection>
-
-            {/* 문서 내보내기 — 헤더에서 이동. 입금결의서(L2 유일 진입점) · 지불증. */}
-            <PostSubSection label="문서 내보내기">
-              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                <Button
-                  size="small" variant="outlined"
-                  startIcon={<DescriptionIcon sx={{ fontSize: 16 }} />}
-                  onClick={handleExportDeposit}
-                  disabled={exporting}
-                  sx={{ minHeight: 40 }}
-                >
-                  {exporting ? '생성중...' : '입금결의서'}
-                </Button>
-                <Button
-                  size="small" variant="outlined"
-                  startIcon={<ReceiptLongIcon sx={{ fontSize: 16 }} />}
-                  onClick={() => setReceiptOpen(true)}
-                  sx={{ minHeight: 40 }}
-                >
-                  지불증
-                </Button>
+                ) : (
+                  <EmptyState
+                    icon={ShippingIcon}
+                    title="아직 출고 대상 주문이 없어요"
+                    description="결제 완료 주문이 생기면 처리 완료 건수가 표시됩니다"
+                    sx={{ py: 4 }}
+                  />
+                )}
               </Box>
             </PostSubSection>
           </SectionCard>

@@ -67,7 +67,7 @@ function triggerDownload(blob, filename) {
  * @param {string} [args.department] - 부서(미지정 시 기본 "마케팅운영팀")
  */
 export async function exportDepositResolution({ event, orders, productsMap, authorName, department }) {
-  const { test, book, tool, total } = computeRevenueByCategory(orders, { productsMap });
+  const { test, book, tool, unclassified, total } = computeRevenueByCategory(orders, { productsMap });
 
   const society = (event?.host_society || '').trim();
   const eventTitle = (event?.event_season || '').trim()
@@ -147,5 +147,5 @@ export async function exportDepositResolution({ event, orders, productsMap, auth
   const ymd = `${year}-${String(month).padStart(2, '0')}`;
   triggerDownload(blob, `입금결의서_${society || eventTitle || '행사'}_${ymd}.xlsx`);
 
-  return { test, book, tool, total };
+  return { test, book, tool, unclassified, total };
 }
