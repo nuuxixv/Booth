@@ -65,7 +65,8 @@ import { groupEventsForDropdown, formatEventStartDate } from '../utils/eventSort
 const StatusBar = ({ statusCounts, totalOrders, onStatusClick }) => {
   const theme = useTheme();
   if (totalOrders === 0) return null;
-  const orderedStatuses = ['pending', 'paid', 'completed', 'cancelled', 'refunded'];
+  // preparing(준비중)은 표시용으로만 분포에 포함한다(맨 앞). 매출 집계에는 넣지 않는다(REVENUE_STATUSES 미포함).
+  const orderedStatuses = ['preparing', 'pending', 'paid', 'completed', 'cancelled', 'refunded'];
   const segments = orderedStatuses
     .filter(s => (statusCounts[s] || 0) > 0)
     .map(s => ({ key: s, count: statusCounts[s], pct: (statusCounts[s] / totalOrders) * 100 }));

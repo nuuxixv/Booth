@@ -15,6 +15,8 @@ import { normalizeCategory, buildGroupMetaMap, groupTestProducts, productMatches
 import ProductCard from './ProductCard';
 import TestGroupCard from './TestGroupCard';
 import ProductSearchBar from './ProductSearchBar';
+import { PinConfirmCard, PinRecheckBox } from './PinOrderParts';
+import { usePinLookup } from '../hooks/usePinLookup';
 
 const PAGE_SIZE = 40;
 
@@ -34,7 +36,7 @@ const forcedColorsChipSx = (selected) => ({
   },
 });
 
-const ProductSelectionStep = ({ cart, onCartChange, discountRate = 0, eventTags = [], eventName = '', visibleCategories = null }) => {
+const ProductSelectionStep = ({ cart, onCartChange, discountRate = 0, eventTags = [], eventName = '', visibleCategories = null, enablePinEntry = false, eventId = null, onPinContinue }) => {
   const theme = useTheme();
   const { addNotification } = useNotification();
   const [allProducts, setAllProducts] = useState([]);
@@ -111,6 +113,11 @@ const ProductSelectionStep = ({ cart, onCartChange, discountRate = 0, eventTags 
   );
 
   const hasSearch = Boolean(debouncedSearch.trim());
+
+  // PIN 진입(opt-in, 기본 off — OrderPage에서만 켠다). 판정은 여기(상위)에서만 돌고
+  // ProductSearchBar 내부는 손대지 않는다(검색 input 격리). 디바운스 검색어가 4자리
+  // 숫자이고 살아 있는 PIN이면 확인 카드, 4자리인데 없는 PIN이면 중립 안내, 그 외 null.
+  const pinResult = usePinLookup(enablePinEntry, eventId, debouncedSearch);
 
   // 인기 탭 술어 — 행사 전체(baseProducts) 기준 3단 폴백(tier1 태그∧인기 / tier2 태그 / tier3 인기)을
   // 한 번만 계산한다. 카테고리 칩 선택과 무관 — 특정 칩에서 결과가 비면 기존 빈 상태 안내가 뜬다.
@@ -380,6 +387,12 @@ const ProductSelectionStep = ({ cart, onCartChange, discountRate = 0, eventTags 
         </Box>
         )}
       </Box>
+
+      {/* PIN 확인 카드 / 재확인 안내 — 결과 목록 위에 얹힘(아래 일반 검색 결과는 그대로 렌더). */}
+      {pinResult?.status === 'confirmed' && (
+        <PinConfirmCard code={pinResult.code} onContinue={() => onPinContinue?.(pinResult.code, pinResult.data)} />
+      )}
+      {pinResult?.status === 'invalid' && <PinRecheckBox />}
 
       {/* Product list */}
       {loading ? (

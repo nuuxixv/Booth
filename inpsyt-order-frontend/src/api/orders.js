@@ -110,6 +110,26 @@ export const getOrders = async (options) => {
 };
 
 /**
+ * 주문 1건을 상세(상품 포함)로 가져온다. 목록 필터와 무관하게 id로 직접 조회.
+ * (PIN 주문 생성 직후 — 목록 필터 때문에 목록에 없을 때 상세를 여는 데 사용.)
+ * @param {number} id
+ * @returns {Promise<object|null>}
+ * @throws {Error} 조회 실패 시
+ */
+export const getOrderById = async (id) => {
+  const { data, error } = await supabase
+    .from('orders')
+    .select(`*, ${ALL_ITEMS_SELECT}`)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) {
+    console.error('Error fetching order by id:', error);
+    throw error;
+  }
+  return data || null;
+};
+
+/**
  * 출고 관리용 주문 목록을 가져옵니다 (order_items → products 중첩 join 포함).
  */
 export const getFulfillmentOrders = async ({ eventId, statuses, dateFrom, dateTo } = {}) => {
