@@ -133,12 +133,41 @@ serve(async (req) => {
     //   return new Response(JSON.stringify({ error: '온라인코드 상품은 inpsyt 아이디가 필요합니다.' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders }, status: 400 })
     // }
 
-    const { data: event, error: eventError } = await supabaseClient
+    // closed_at(학회 종료 시각)는 신규 컬럼(DRAFT 20261019000200). 미적용 환경에선 이
+    // 컬럼을 포함한 select 가 통째로 실패해 주문 생성이 막힌다(학회 중 = 치명적) →
+    // products/settings 와 같은 graceful fallback: 컬럼 포함 select 실패 시 컬럼 없이
+    // 재조회하고, closed_at 은 undefined 로 남겨 아래 종료 판정을 자동 통과시킨다(회귀 0).
+    let event: any = null
+    const eventWithClosed = await supabaseClient
       .from('events')
-      .select('id, name, discount_rate')
+      .select('id, name, discount_rate, closed_at')
       .eq('id', event_id)
       .single()
-    if (eventError) throw eventError
+
+    if (eventWithClosed.error) {
+      console.warn('events.closed_at select 실패 — 컬럼 없이 재조회 fallback:', eventWithClosed.error.message)
+      const { data: fallbackEvent, error: fallbackEventError } = await supabaseClient
+        .from('events')
+        .select('id, name, discount_rate')
+        .eq('id', event_id)
+        .single()
+      if (fallbackEventError) throw fallbackEventError
+      event = fallbackEvent
+    } else {
+      event = eventWithClosed.data
+    }
+
+    // 종료된 학회면 주문 생성 거부(링크가 닫힌 뒤의 잔존 탭·북마크 진입 차단).
+    // closed_at 이 undefined(컬럼 부재 환경)면 이 분기를 타지 않음 → 기존 동작 보존.
+    if (event?.closed_at) {
+      return new Response(
+        JSON.stringify({ error: '종료된 학회입니다.' }),
+        {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          status: 400,
+        }
+      )
+    }
 
     const discountRate = event ? event.discount_rate : 0
 
@@ -183,12 +212,17 @@ serve(async (req) => {
     // 마이그레이션보다 함수가 먼저 올라가면 이 컬럼 때문에 insert가 전부 실패한다(학회 중 = 치명적).
     // 그래서 배포 순서에 의존하지 않고, 컬럼 부재(42703 / PGRST204)면 그 필드만 빼고 재시도한다.
     // 읽기 쪽 is_active·discount_override의 graceful degrade와 같은 원칙을 쓰기 쪽에 적용한 것.
+    // status 를 명시한다. 일반 주문은 항상 'pending'(결제대기)로 생성된다.
+    // 과거엔 DB 기본값에 의존해 암묵적으로 pending 이 됐으나, PIN 주문이 'preparing'
+    // 이라는 별도 상태를 도입하면서 "일반 주문 = 명시적 pending" 을 코드에 고정한다.
+    // (값은 기존과 동일 → 회귀 0. 기본값이 무엇이든 일반 주문은 pending 으로 안전.)
     const baseOrderRow = {
       customer_name,
       phone_number,
       shipping_address,
       inpsyt_id,
       customer_request,
+      status: 'pending',
       total_cost: totalOriginalPrice,
       discount_amount: totalDiscountAmount,
       delivery_fee: shippingCost,

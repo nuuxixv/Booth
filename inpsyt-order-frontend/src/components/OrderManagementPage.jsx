@@ -899,7 +899,8 @@ const OrderManagementPage = () => {
                 label="상태 일괄 변경"
                 onChange={(e) => setBulkStatus(e.target.value)}
               >
-                {Object.entries(statusToKorean).map(([key, value]) => <MenuItem key={key} value={key}>{value}</MenuItem>)}
+                {/* preparing(준비중)은 PIN 주문에서만 생기는 상태라 일괄 변경 대상에서 뺀다. */}
+                {Object.entries(statusToKorean).filter(([key]) => key !== 'preparing').map(([key, value]) => <MenuItem key={key} value={key}>{value}</MenuItem>)}
               </Select>
             </FormControl>
             <Button variant="contained" onClick={handleBulkStatusUpdate} disabled={!bulkStatus}>

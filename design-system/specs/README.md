@@ -40,7 +40,7 @@
 - `A1_OrderManagementPage.md` — 주문 관리 (필터·일괄·엑셀·신규/상세 모달)
 - `A2_OrderDetailModal.md` — 주문 상세 모달 (편집·연계·삭제·알림톡 재발송, **시안 부재 — 실 컴포넌트가 단일 진실 소스**)
 - `A2_NewOrderModal.md` — 신규 주문 모달 (학회·현장판매·상품 검색·장바구니, **시안 부재 — 실 컴포넌트가 단일 진실 소스**)
-- `A2_OrderStatusPage.md` — ⚠️ **중복 의심 — `C3_OrderStatusPage`와 동일 화면으로 보임. 확인 후 폐기 표기 필요(미확정).**
+- `A2_OrderStatusPage.md` — ⚠️ **(폐기) 2026-10-19 — `C3_OrderStatusPage.md`가 고객 주문 상태 화면의 단일 진실 소스. 현장 도움(PIN) 주문의 준비중 안내도 `C3`에서 다룬다. 파일 상단 폐기 헤더는 트랙 A가 단다. 히스토리 보존용.**
 - `A2_OrderLookupPage.md` — ⚠️ **(폐기) 고객 주문 조회 — `C2_OrderLookupPage`와 동일 폐기 화면. 히스토리 보존용.**
 - `A3_FulfillmentPage.md` — 출고 관리 (2026-06-12 "출고 현황"에서 개칭)
 - `A4_DashboardPage.md` — 대시보드 (3단 계층 필터·매출 KPI·랭킹·현장 보고서·최근 주문)
@@ -67,7 +67,7 @@
 
 다른 화면의 시트가 필요하면 `_TEMPLATE.md` 를 복사해 같은 톤·포맷으로 추가한다.
 
-> **잔여 정리 항목 (확인 필요):** `A2_OrderStatusPage`(↔`C3` 중복 의심)와 `A2_OrderLookupPage`(↔`C2` 폐기 중복)는 각 실 컴포넌트와 대조해 폐기 여부를 확정하면 된다. 오티즘 트랙과 분리된 별도 정리 사안.
+> **잔여 정리 항목:** `A2_OrderStatusPage`는 **2026-10-19 폐기 확정**(↔`C3_OrderStatusPage.md`가 단일 진실 소스, 트랙 A가 파일 상단 폐기 헤더 부착). `A2_OrderLookupPage`(↔`C2` 폐기 중복)는 히스토리 보존용. 오티즘 트랙과 분리된 별도 정리 사안.
 
 ## 톤 약속
 

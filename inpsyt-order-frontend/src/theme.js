@@ -46,6 +46,7 @@ const ACCENT = {
 // constants/orderStatus.js 와 동기화됨
 // ─────────────────────────────────────────────
 const STATUS = {
+  preparing: '#64748B',
   pending:   '#F59E0B',
   paid:      '#10B981',
   completed: '#6366F1',

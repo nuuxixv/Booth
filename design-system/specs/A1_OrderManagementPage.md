@@ -3,7 +3,8 @@
 > 이 시트는 어드민 주문 관리 화면의 정보·기능·데이터 구조의 단일 진실 소스다.
 > 시안과 실서비스 구현은 이 시트의 모든 항목을 1:1로 반영해야 한다.
 > 임의 단순화·통합·생략은 건우님의 명시적 승인 후 이 시트를 먼저 갱신한 다음에만 허용된다.
-> 마지막 갱신: 2026-05-28 신설 (M3 frontend 위임 사전 — 게이트 1.5 통과 목적).
+> 마지막 갱신: 2026-10-19 **준비중(PIN 주문) 상태 확장(사양·시안 단계)**(product-designer). 상태 6종째 `preparing`(준비중) 추가 · 목록 준비중 뱃지 옆 PIN 표시 · 매출·출고·합배송·일괄 변경 제외 · 상태 전이 취소만. 아래 "## 준비중(PIN 주문) 상태 확장" 참조. 시안 `PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`) 단계 ⑤. 근거 `DOCS/PRD_현장도움주문.md` §4·§6.
+> 이전 갱신: 2026-05-28 신설 (M3 frontend 위임 사전 — 게이트 1.5 통과 목적).
 
 ## 참조 파일
 - 실 컴포넌트: `inpsyt-order-frontend/src/components/OrderManagementPage.jsx` (866줄)
@@ -287,7 +288,33 @@ frontend가 M3 사이클에서 흡수해야 할 항목:
 
 6. ~~**viewer 권한은 의외로 많은 것을 본다.**~~ **2026-07-20 해소** — 엑셀 반출 기능 전면 폐지로 viewer의 고객정보 반출 경로 자체가 사라짐. viewer는 이제 조회·필터만 가능.
 
+## 준비중(PIN 주문) 상태 확장 (2026-10-19, 사양·시안 단계)
+
+> 근거: `DOCS/PRD_현장도움주문.md` §4(담당자 흐름)·§6(기술 요약). PIN 주문으로 생긴 미완료 주문의 상태. 신규 주문 분기·PIN 생성은 `A2_NewOrderModal.md`, 준비중 상세는 `A2_OrderDetailModal.md` 참조.
+
+### 상태 상수 확장 (`constants/orderStatus.js` — 두 트랙 공통, 1글자도 바꾸지 말 것)
+- [ ] `STATUS_TO_KOREAN.preparing = '준비중'` (6종째). `STATUS_COLORS.preparing = '#64748B'`.
+- [ ] **`REVENUE_STATUSES`에 넣지 않음** — 준비중은 매출 집계 제외(미완료).
+- [ ] `ALLOWED_TRANSITIONS.preparing = ['cancelled']` — **취소만.** 결제대기(`pending`) 전환은 상품+고객정보 충족 시 **자동**이라 드롭다운(상태 Select) 대상이 아니다.
+- [ ] (구현 메모) 상태 컬럼은 제약 없는 글자라 값 추가만으로 동작. 뱃지 색은 `StatusBadge`/theme.status 정합화 시 동기화.
+
+### 목록 — 준비중 행 표시
+- [ ] **상태 셀: 준비중 `StatusBadge` + 옆에 PIN(`match_code`) 칩 재표시.** 고객이 제출하면 결제대기로 바뀌며 PIN 칩 사라짐.
+- [ ] **상태 Select(전이) = 취소만.** `ALLOWED_TRANSITIONS.preparing=['cancelled']`이므로 열면 "취소" 1개. (목록에서 취소 가능 — PRD §5 "담당자가 주문을 잘못 만듦")
+- [ ] 고객명 비어 있음(제출 전): "작성 중" 등 muted 표기. 금액은 담긴 상품 기준 표시하되 **매출 집계에는 미포함**.
+- [ ] 모바일 카드도 동일(준비중 뱃지 + PIN). 휴대폰 폭 가로 스크롤 금지(기존 모바일 카드 리스트 패턴 유지, MEMORY 모바일 Read-first).
+
+### 매출·출고·합배송·일괄 변경에서 제외
+- [ ] **매출**: `REVENUE_STATUSES` 미포함 → 매출 집계·대시보드·현장 보고에서 제외(PRD §6).
+- [ ] **출고**: 출고는 결제완료(`paid`)+처리완료(`completed`) 기준이라 준비중 자동 제외.
+- [ ] **합배송**: 준비중은 연계(합배송) 후보에서 제외(`getLinkableOrdersByEvent` 조건에 준비중 배제).
+- [ ] **일괄 상태 변경 대상 제외**: 전체 선택·헤더 체크박스가 준비중을 제외(합배송 그룹 제외와 같은 결). 준비중 행 **체크박스 disabled + Tooltip "준비중 주문은 일괄 변경 대상이 아니에요"**.
+
+### 시안 반영
+- [ ] 시안: `src/components/PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`) — 단계 ⑤(주문 목록: 데스크톱 테이블 + 휴대폰 카드, 준비중 뱃지 + PIN, 체크박스 disabled, 상태 전이 취소만, 제외 캡션). 단계 ①(신규 주문 분기 진입)도 이 페이지 "+신규 주문"에서 시작.
+
 ## 변경 이력
+- 2026-10-19 준비중(PIN 주문) 상태 확장(사양·시안 단계, product-designer) — 상태 6종째 `preparing`(준비중/#64748B) 추가(REVENUE_STATUSES 미포함, ALLOWED_TRANSITIONS.preparing=['cancelled']). 목록 준비중 뱃지 옆 PIN 재표시(제출 시 소멸), 상태 전이 취소만, 고객명 "작성 중" muted. 매출·출고·합배송·일괄 변경(체크박스 disabled+Tooltip) 제외. "+신규 주문" 분기(PIN/수기)는 A2_NewOrderModal. 시안 `PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`) 단계 ⑤. 근거 `DOCS/PRD_현장도움주문.md` §4·§6. 상태 상수 실 반영·DB는 별도 사이클.
 - 2026-08-25 QA P0-2 일괄 변경 합배송 위임 우회 차단 — 일괄 상태 변경이 `bulk_update_order_status` RPC로 직행하며 단일 변경이 강제하는 대표 배송지 위임(`classifyGroupStatusChange`→auto/pick)을 우회하던 결함 수정. 대표 주문을 일괄 취소하면 `representative_child_id`가 취소된 주문을 계속 가리켜 묶음 배송지 스테일 = 배송 사고. **방침: 일괄 경로에서 합배송 그룹 소속(껍데기·자식 전부)을 제외**(위임은 개별 행·상세 경로 몫, 재구현 안 함). (1) 전체 선택·헤더 체크박스가 `selectableOrderIds`로 그룹 소속 제외, (2) 고아 자식 단독 행/카드 체크박스 disabled+Tooltip, (3) 실행 직전 `partitionBulkSelectable`로 최종 가드(제외 N건 토스트). 순수 함수 `selectableOrderIds`·`partitionBulkSelectable`·`isGroupMemberOrder`를 `utils/groupOrder.js`에 추출, `groupOrder.test.js`에 단위 테스트 7건 추가(독립만/자식섞임/대표섞임/전부그룹). 기존 단일 변경·모달 경로 무변경.
 - 2026-07-20 목록 드롭다운 현재상태 숨김 + 엑셀 반출 폐지 — (1) 목록 상태 Select를 `ALLOWED_TRANSITIONS` 직접 사용으로 변경: 현재 상태는 메뉴에서 제거하고 닫힘 표시값(`value="" + displayEmpty + renderValue`)으로만 고정, 열면 허용 전이 후보만 노출(단독 행·합배송 자식 행 동일). 종결은 읽기전용 배지 유지. `getStatusOptions`는 미사용이 되어 `orderStatus.js`·`orderStatus.test.js`에서 제거(`ALLOWED_TRANSITIONS` 검증은 유지). 상세모달(OrderSections) 상태 Select는 전체 자유전환 유지(미변경). (2) 엑셀 반출 전면 폐지 — 주문관리·출고관리(A3)의 엑셀 다운로드 버튼·Menu·핸들러·`utils/orderExcel.js`·`orderExcel.test.js` 삭제. viewer 고객정보 반출 부채(핵심 발견 6) 동시 해소. `xlsx` 의존성은 상품관리 등 잔존 사용처 있어 유지.
 - 2026-05-28 신설 — M3 frontend 위임 사전 작성. 게이트 1.5 통과 목적. 시안(`OrderManagementPreview.jsx`) vs 실 페이지(`OrderManagementPage.jsx`) 차이 10건 적출. RPC 부채 1건, viewer 엑셀 권한 1건 부채 후보로 기록.
