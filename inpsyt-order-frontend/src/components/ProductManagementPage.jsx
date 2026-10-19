@@ -7,19 +7,16 @@ import {
   DialogActions, DialogContent, DialogTitle, FormControlLabel, Checkbox,
   FormControl, InputLabel, Select, MenuItem, Menu, Autocomplete, Chip,
   Pagination, IconButton, Tooltip, ToggleButton, ToggleButtonGroup,
-  CircularProgress, LinearProgress, Switch, Collapse, ListItemIcon, alpha, useTheme,
+  CircularProgress, LinearProgress, Switch, Collapse, ListItemIcon, Divider, alpha, useTheme,
 } from '@mui/material';
 import {
   Add as AddIcon, FileDownload as DownloadIcon, FileUpload as UploadIcon,
   Edit as EditIcon, Search as SearchIcon, Inventory as InventoryIcon,
   Inventory2 as Inventory2Icon, LocalOffer as TagIcon,
-  TrendingUp as TrendingUpIcon, Delete as DeleteIcon,
+  Delete as DeleteIcon,
   DeleteForever as DeleteForeverIcon, CheckBox as CheckBoxIcon,
   RestartAlt as RestartAltIcon, Tune as TuneIcon,
   Description as DescriptionIcon,
-  MenuBook as MenuBookIcon,
-  Science as ScienceIcon,
-  Build as BuildIcon,
   Category as CategoryIcon,
   AccountTree as AccountTreeIcon,
   Check as CheckIcon,
@@ -29,7 +26,6 @@ import {
   MergeType as MergeTypeIcon,
   MoreVert as MoreVertIcon,
   Tune as TuneOptionsIcon,
-  HelpOutline as HelpOutlineIcon,
 } from '@mui/icons-material';
 import * as XLSX from 'xlsx';
 import { fetchAllProducts } from '../api/products';
@@ -51,9 +47,12 @@ import { matchesSearch } from '../utils/search';
 import { percentToRateNullable, rateToPercentNullable } from '../utils/pricing';
 import { parseBool, parseProductSheet } from '../utils/productExcel';
 import { exportProductList } from '../utils/productExcelExport';
+import {
+  DEFAULT_FACETS, UNKNOWN_CATEGORY, isFacetsActive,
+  matchesCategory, matchesFacets, matchesTags, buildTagOptions,
+} from '../utils/productFilters';
 import { buildProductImageFilename, MAX_IMAGE_BYTES } from '../utils/productImageName';
 import {
-  CATEGORY_COLORS, CATEGORY_KEY_BY_LABEL,
   MASTER_COLOR_FALLBACK, MASTER_COLOR_PRESETS,
 } from '../constants/categoryColors';
 import { PageHeader, SectionCard, ActionSlot, EmptyState } from './ui';
@@ -62,6 +61,21 @@ import TableSkeleton from './TableSkeleton';
 const categories = ['도서', '검사', '도구'];
 const PARENT_CATEGORIES = ['검사', '도서', '도구'];
 const DELETE_ALL_CONFIRM_TEXT = '삭제합니다';
+
+// ─── 필터 바(A6 §필터 바, 2026-10-19) — 판정 로직은 utils/productFilters ─────────
+// 카테고리 '미확인' = 도서·검사·도구 어느 값도 아님(NULL·빈 문자열·그 외). 미확인은 항상 끝.
+const CATEGORY_FILTER_OPTIONS = [...categories, UNKNOWN_CATEGORY].map((c) => ({ value: c, label: c }));
+// Y/N 속성: [전체|Y|N] — '전체'가 명시 세그먼트(기본 선택).
+const YN_OPTIONS = [
+  { value: 'all', label: '전체' },
+  { value: 'y', label: 'Y' },
+  { value: 'n', label: 'N' },
+];
+// 온라인코드: [전체|Y|N|미확인] — includes_online_code 3상태 그대로, 미확인은 항상 끝.
+const ONLINE_CODE_OPTIONS = [
+  ...YN_OPTIONS,
+  { value: 'unknown', label: '미확인' },
+];
 
 // 이미지 파일명 안전 문자 — 영숫자·대시·언더스코어·점만. 한글·공백·특수문자는 Storage 키가 깨진다.
 const SAFE_IMAGE_FILENAME = /^[A-Za-z0-9._-]+$/;
@@ -82,6 +96,59 @@ const createEmptyProduct = () => ({
   includes_online_code: null,
   tags: [],
 });
+
+// 필터 바 패싯 토글(라벨 + ToggleButtonGroup exclusive). A6 §필터 바 시안(ProductFilterBarPreview) 1:1.
+// Y/N 속성은 '전체'가 명시 세그먼트 → 활성 버튼 재클릭(null)은 무시(현재 값 유지).
+// 카테고리는 clearable — 활성 버튼 재클릭 시 전체('')로 해제(미선택=전체).
+const FacetToggle = ({ label, value, options, onChange, clearable = false }) => {
+  const theme = useTheme();
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, minWidth: 0 }}>
+      <Typography
+        variant="caption"
+        sx={{ color: 'text.secondary', fontWeight: 700, minWidth: 68, flexShrink: 0 }}
+      >
+        {label}
+      </Typography>
+      <ToggleButtonGroup
+        value={value}
+        exclusive
+        size="small"
+        onChange={(_, next) => {
+          if (next === null) {
+            if (clearable) onChange('');
+            return;
+          }
+          onChange(next);
+        }}
+        sx={{
+          flexWrap: 'wrap',
+          '& .MuiToggleButton-root': {
+            ...theme.typography.body2,
+            px: 1.5,
+            py: 0.5,
+            lineHeight: 1.4,
+            textTransform: 'none',
+            borderColor: theme.gray[300],
+            color: 'text.secondary',
+            '&.Mui-selected': {
+              color: theme.palette.primary.main,
+              bgcolor: alpha(theme.palette.primary.main, 0.08),
+              fontWeight: 700,
+              '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.12) },
+            },
+          },
+        }}
+      >
+        {options.map((opt) => (
+          <ToggleButton key={opt.value} value={opt.value}>
+            {opt.label}
+          </ToggleButton>
+        ))}
+      </ToggleButtonGroup>
+    </Box>
+  );
+};
 
 // 상품 표 썸네일(A6 §표 썸네일). 1:1 작은 정방형.
 // 미등록·onError면 셀 비움(null) — 플레이스홀더 폐기(건우님 2026-06-29). 대부분 미등록(NULL)이 정상.
@@ -367,7 +434,7 @@ const ProductManagementPage = () => {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [expandedGroups, setExpandedGroups] = useState(new Set()); // 펼친 검사군 id(및 '미분류')
   const [tgMenuAnchor, setTgMenuAnchor] = useState(null); // 검사군 헤더 행 액션 메뉴 { el, group }
-  const [productQuickFilter, setProductQuickFilter] = useState(null);
+  const [facets, setFacets] = useState(DEFAULT_FACETS); // 속성별 Y/N 필터(A6 §필터 바)
   const [selectedTags, setSelectedTags] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [productsPerPage, setProductsPerPage] = useState(50);
@@ -457,32 +524,15 @@ const ProductManagementPage = () => {
     return m;
   }, [subcategories]);
 
-  // 검색어·카테고리·태그 변경 시 1페이지로 리셋
-  useEffect(() => { setCurrentPage(1); }, [searchTerm, selectedCategory, productQuickFilter, selectedTags]);
+  // 검색어·카테고리·속성·태그 변경 시 1페이지로 리셋
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, selectedCategory, facets, selectedTags]);
 
-  // 카드용 집계 — 전체 상품 기준
-  const totalProducts = allProducts.length;
-  const totalDiscountableCount = useMemo(() => allProducts.filter(p => p.is_discountable).length, [allProducts]);
-  const totalOverrideCount = useMemo(() => allProducts.filter(p => p.discount_override != null).length, [allProducts]);
-  const totalPopularCount = useMemo(() => allProducts.filter(p => p.is_popular).length, [allProducts]);
-  // 온라인코드 미확인 — includes_online_code NULL(미적용 환경이면 undefined도 NULL 취급) & 검사 카테고리.
-  // 온라인코드는 사실상 검사 상품에만 딸리므로 검사군으로 좁혀 미확인 목록을 관리한다.
-  const totalOnlineCodeUnknownCount = useMemo(
-    () => allProducts.filter(p => p.includes_online_code == null && p.category === '검사').length,
-    [allProducts],
-  );
-  const categoryCounts = useMemo(() => {
-    const result = {};
-    categories.forEach(cat => { result[cat] = allProducts.filter(p => p.category === cat).length; });
-    return result;
-  }, [allProducts]);
-  // 태그 옵션 = 상품 태그(products.tags) ∪ 학회 목록(societies.name).
+  // 태그 옵션 = 학회 목록(societies.name) ∪ 상품 자유 태그(products.tags). 학회명 앞쪽, 자유 태그 뒤쪽.
   // 학회 관리 탭에 등록한 학회명을 검색 편의로 태그 옵션에 항상 노출(건우님 피드백 #3).
-  const availableTags = useMemo(() => {
-    const fromProducts = allProducts.flatMap(p => p.tags || []);
-    const fromSocieties = societies.map(s => s.name).filter(Boolean);
-    return Array.from(new Set([...fromProducts, ...fromSocieties])).sort();
-  }, [allProducts, societies]);
+  const { availableTags, societyTagSet } = useMemo(
+    () => buildTagOptions(allProducts, societies),
+    [allProducts, societies],
+  );
 
   // 검사군 id → 메타(약어·검사명) 맵 — 검색 대상에 검사군 abbr·name 포함용.
   const tgById = useMemo(() => {
@@ -491,7 +541,7 @@ const ProductManagementPage = () => {
     return m;
   }, [testGroups]);
 
-  // 필터: 검색 + 카테고리 + 빠른 필터
+  // 필터: 검색 + 카테고리 + 속성(Y/N, 속성 간 AND) + 태그(OR)
   const filteredProducts = useMemo(() => {
     let list = allProducts;
     // 검색 대상 = 상품명(name) + 소속 검사군의 검사명(name)·약어(abbr).
@@ -506,18 +556,17 @@ const ProductManagementPage = () => {
         return false;
       });
     }
-    if (selectedCategory) list = list.filter(p => p.category === selectedCategory);
-    if (productQuickFilter === 'discountable') list = list.filter(p => p.is_discountable);
-    if (productQuickFilter === 'override') list = list.filter(p => p.discount_override != null);
-    if (productQuickFilter === 'popular') list = list.filter(p => p.is_popular);
-    if (productQuickFilter === 'onlineUnknown') list = list.filter(p => p.includes_online_code == null && p.category === '검사');
-    if (selectedTags.length > 0) list = list.filter(p => selectedTags.some(tag => p.tags?.includes(tag)));
+    list = list.filter((p) => (
+      matchesCategory(p, selectedCategory)
+      && matchesFacets(p, facets)
+      && matchesTags(p, selectedTags)
+    ));
     return [...list].sort((a, b) => {
       const popDiff = (b.is_popular ? 1 : 0) - (a.is_popular ? 1 : 0);
       if (popDiff !== 0) return popDiff;
       return (a.name || '').localeCompare(b.name || '');
     });
-  }, [allProducts, searchTerm, selectedCategory, productQuickFilter, selectedTags, tgById]);
+  }, [allProducts, searchTerm, selectedCategory, facets, selectedTags, tgById]);
 
   const totalFiltered = filteredProducts.length;
 
@@ -579,7 +628,7 @@ const ProductManagementPage = () => {
   const allPageSelected = displayedProducts.length > 0 && displayedProducts.every((product) => selectedIds.has(product.id));
   const somePageSelected = displayedProducts.some((product) => selectedIds.has(product.id));
   const selectedCount = selectedIds.size;
-  const hasFilters = Boolean(searchTerm || selectedCategory || productQuickFilter || selectedTags.length > 0);
+  const hasFilters = Boolean(searchTerm || selectedCategory || isFacetsActive(facets) || selectedTags.length > 0);
 
   const handleOpen = useCallback((product = null) => {
     setIsEditing(Boolean(product));
@@ -1095,9 +1144,11 @@ const ProductManagementPage = () => {
     setSearchResetKey(k => k + 1);
     setSelectedCategory('');
     setCurrentPage(1);
-    setProductQuickFilter(null);
+    setFacets(DEFAULT_FACETS);
     setSelectedTags([]);
   };
+
+  const setFacet = (key, value) => setFacets((prev) => ({ ...prev, [key]: value }));
 
   // ── 소분류 마스터 CRUD (즉시 DB 반영) ──
   const handleSaveSub = async () => {
@@ -1235,63 +1286,6 @@ const ProductManagementPage = () => {
   const canEdit = hasPermission('products:edit');
   const tableColumnCount = canEdit ? 10 : 9;
 
-  // 빠른 필터 카드 — 시안 QuickFilterCard 패턴 (border 기반, 그라데이션 제거 — 02 §색 E항)
-  const renderQuickFilterCard = (opts) => {
-    const { label, value, Icon, baseColor, active, onClick } = opts;
-    return (
-      <Box
-        key={label}
-        onClick={onClick}
-        sx={{
-          flex: '1 1 140px',
-          minWidth: 130,
-          cursor: 'pointer',
-          bgcolor: 'background.paper',
-          border: `1px solid ${alpha(baseColor, active ? 0.55 : 0.18)}`,
-          borderRadius: `${theme.radii.md}px`,
-          px: 2,
-          py: 1.5,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 1,
-          transition: `all 0.15s ${theme.easing.toss}`,
-          minHeight: 64,
-          '&:hover': {
-            borderColor: alpha(baseColor, 0.4),
-            bgcolor: alpha(baseColor, 0.04),
-          },
-        }}
-      >
-        <Box sx={{ minWidth: 0 }}>
-          <Typography
-            variant="caption"
-            sx={{
-              color: 'text.secondary',
-              fontWeight: 700,
-              letterSpacing: '0.03em',
-              textTransform: 'uppercase',
-              display: 'block',
-            }}
-          >
-            {label}
-          </Typography>
-          <Typography
-            variant="h3"
-            sx={{
-              color: active ? baseColor : 'text.primary',
-              lineHeight: 1.1,
-              fontFeatureSettings: '"tnum" 1',
-            }}
-          >
-            {value}
-          </Typography>
-        </Box>
-        <Icon sx={{ fontSize: 28, color: alpha(baseColor, active ? 0.7 : 0.4) }} />
-      </Box>
-    );
-  };
-
   const headerAction = (
     <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
       <Tooltip title="엑셀 양식 다운로드">
@@ -1426,117 +1420,131 @@ const ProductManagementPage = () => {
         </Collapse>
       )}
 
-      <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
-        {renderQuickFilterCard({
-          label: '전체 상품',
-          value: totalProducts,
-          Icon: InventoryIcon,
-          baseColor: theme.palette.primary.main,
-          active: productQuickFilter === null && !selectedCategory,
-          onClick: () => { setProductQuickFilter(null); setSelectedCategory(''); },
-        })}
-        {renderQuickFilterCard({
-          label: '할인 가능',
-          value: totalDiscountableCount,
-          Icon: TagIcon,
-          baseColor: theme.palette.success.main,
-          active: productQuickFilter === 'discountable',
-          onClick: () => setProductQuickFilter((prev) => (prev === 'discountable' ? null : 'discountable')),
-        })}
-        {renderQuickFilterCard({
-          label: '개별 할인',
-          value: totalOverrideCount,
-          Icon: TagIcon,
-          baseColor: theme.palette.info.main,
-          active: productQuickFilter === 'override',
-          onClick: () => setProductQuickFilter((prev) => (prev === 'override' ? null : 'override')),
-        })}
-        {renderQuickFilterCard({
-          label: '인기 상품',
-          value: totalPopularCount,
-          Icon: TrendingUpIcon,
-          baseColor: theme.palette.warning.main,
-          active: productQuickFilter === 'popular',
-          onClick: () => setProductQuickFilter((prev) => (prev === 'popular' ? null : 'popular')),
-        })}
-        {renderQuickFilterCard({
-          label: '온라인코드 미확인',
-          value: totalOnlineCodeUnknownCount,
-          Icon: HelpOutlineIcon,
-          baseColor: theme.palette.error.main,
-          active: productQuickFilter === 'onlineUnknown',
-          onClick: () => setProductQuickFilter((prev) => (prev === 'onlineUnknown' ? null : 'onlineUnknown')),
-        })}
-        {[
-          // 카테고리 색은 design-system Appendix §2-1 / 08 D17 정식 토큰
-          // (constants/categoryColors.js). 인라인 hex·theme.palette 우회 금지.
-          { key: '도서', Icon: MenuBookIcon, color: CATEGORY_COLORS[CATEGORY_KEY_BY_LABEL['도서']] },
-          { key: '검사', Icon: ScienceIcon, color: CATEGORY_COLORS[CATEGORY_KEY_BY_LABEL['검사']] },
-          { key: '도구', Icon: BuildIcon, color: CATEGORY_COLORS[CATEGORY_KEY_BY_LABEL['도구']] },
-        ].map(({ key, Icon, color }) => renderQuickFilterCard({
-          label: key,
-          value: categoryCounts[key] ?? 0,
-          Icon,
-          baseColor: color,
-          active: selectedCategory === key,
-          onClick: () => setSelectedCategory(prev => prev === key ? '' : key),
-        }))}
-      </Box>
-
-      <SectionCard sx={{ mb: 2 }} padding={16}>
-        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center', mb: availableTags.length > 0 ? 2 : 0 }}>
-          <ProductSearchBar
-            onSearch={setSearchTerm}
-            delay={60}
-            label="상품명 검색"
-            placeholder=""
-            size="small"
-            sx={{ flexGrow: 1, minWidth: 200 }}
-            resetKey={searchResetKey}
-          />
+      {/* ─── 필터 바(A6 §필터 바 2026-10-19) — 속성별 단일 선택(속성 간 AND) + 태그 다중(OR) ─── */}
+      <SectionCard sx={{ mb: 2 }} padding={20}>
+        {/* 표시 건수 + 필터 초기화(우측 상단, 상시 노출·필터 없으면 disabled) */}
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1.5, mb: 1.5, minHeight: 36 }}>
           {hasFilters && (
-            <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-              {totalFiltered}개 표시 중
+            <Typography variant="body2" sx={{ color: 'text.secondary', whiteSpace: 'nowrap', fontFeatureSettings: '"tnum" 1' }}>
+              <Box component="span" sx={{ fontWeight: 700, color: 'text.primary' }}>{totalFiltered}</Box>개 표시 중
             </Typography>
           )}
-          {/* '검사' 선택 시 그룹 뷰가 디폴트이자 유일 뷰(토글 없음). 검사군 추가는 이 뷰에서만 노출. */}
-          {selectedCategory === '검사' && canEdit && (
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<RestartAltIcon sx={{ fontSize: 16 }} />}
+            onClick={handleResetFilters}
+            disabled={!hasFilters}
+            sx={{ minHeight: 36, whiteSpace: 'nowrap' }}
+          >
+            필터 초기화
+          </Button>
+        </Box>
+
+        {/* 카테고리 — '검사' 선택 시 그룹 뷰가 디폴트이자 유일 뷰. 검사군 추가는 이 뷰에서만 노출. */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', mb: 1.5 }}>
+          <FacetToggle
+            label="카테고리"
+            value={selectedCategory || null}
+            options={CATEGORY_FILTER_OPTIONS}
+            onChange={setSelectedCategory}
+            clearable
+          />
+          {groupViewActive && canEdit && (
             <Button
-              variant="outlined"
               size="small"
-              startIcon={<AccountTreeIcon />}
+              variant="outlined"
+              startIcon={<AccountTreeIcon sx={{ fontSize: 16 }} />}
               onClick={() => setTgEditor({ group: null })}
-              sx={{ whiteSpace: 'nowrap' }}
+              sx={{ minHeight: 36, whiteSpace: 'nowrap' }}
             >
               검사군 추가
             </Button>
           )}
-          {hasFilters && (
-            <Button variant="outlined" onClick={handleResetFilters} size="small" startIcon={<RestartAltIcon />}>
-              초기화
-            </Button>
-          )}
         </Box>
+
+        {/* 속성(Y/N) 2열 그리드 */}
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+            columnGap: 3,
+            rowGap: 1.5,
+          }}
+        >
+          <FacetToggle label="할인 여부" value={facets.isDiscountable} options={YN_OPTIONS} onChange={(v) => setFacet('isDiscountable', v)} />
+          <FacetToggle label="개별 할인" value={facets.discountOverride} options={YN_OPTIONS} onChange={(v) => setFacet('discountOverride', v)} />
+          <FacetToggle label="인기 상품" value={facets.isPopular} options={YN_OPTIONS} onChange={(v) => setFacet('isPopular', v)} />
+          <FacetToggle label="신상품" value={facets.isNew} options={YN_OPTIONS} onChange={(v) => setFacet('isNew', v)} />
+          <FacetToggle label="이미지 등록" value={facets.hasImage} options={YN_OPTIONS} onChange={(v) => setFacet('hasImage', v)} />
+          <FacetToggle label="온라인코드" value={facets.onlineCode} options={ONLINE_CODE_OPTIONS} onChange={(v) => setFacet('onlineCode', v)} />
+        </Box>
+
         {availableTags.length > 0 && (
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-            {availableTags.map(tag => (
-              <Chip
-                key={tag}
-                label={tag}
-                size="small"
-                variant={selectedTags.includes(tag) ? 'filled' : 'outlined'}
-                color={selectedTags.includes(tag) ? 'primary' : 'default'}
-                onClick={() => {
-                  setSelectedTags(prev =>
-                    prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+          <>
+            <Divider sx={{ my: 2 }} />
+
+            {/* 태그(학회 ∪ 자유 태그, 다중 OR) */}
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, flexWrap: 'wrap' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 68, pt: 0.75, flexShrink: 0 }}>
+                <TagIcon sx={{ fontSize: 15, color: 'text.secondary' }} />
+                <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 700 }}>태그</Typography>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
+                {availableTags.map((tag) => {
+                  const selected = selectedTags.includes(tag);
+                  return (
+                    <Chip
+                      key={tag}
+                      label={tag}
+                      size="small"
+                      clickable
+                      onClick={() => setSelectedTags((prev) => (
+                        prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+                      ))}
+                      icon={(
+                        <Checkbox
+                          checked={selected}
+                          size="small"
+                          tabIndex={-1}
+                          disableRipple
+                          sx={{ p: 0, ml: 0.5, '& .MuiSvgIcon-root': { fontSize: 16 } }}
+                        />
+                      )}
+                      sx={{
+                        height: 28,
+                        fontWeight: selected ? 700 : 500,
+                        color: selected ? theme.palette.primary.main : 'text.secondary',
+                        bgcolor: selected ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
+                        border: `1px solid ${selected ? alpha(theme.palette.primary.main, 0.4) : theme.gray[300]}`,
+                        // 학회 태그 실선 · 자유 태그 점선(그룹 구분용 중립 테두리 — 색 인디케이터 아님)
+                        ...(societyTagSet.has(tag) ? {} : { borderStyle: 'dashed' }),
+                        '& .MuiChip-label': { ...theme.typography.caption, pl: 0.5 },
+                        '&:hover': { bgcolor: selected ? alpha(theme.palette.primary.main, 0.12) : theme.gray[50] },
+                      }}
+                    />
                   );
-                  setCurrentPage(1);
-                }}
-                sx={{ fontWeight: selectedTags.includes(tag) ? 700 : 500 }}
-              />
-            ))}
-          </Box>
+                })}
+              </Box>
+            </Box>
+            <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block', mt: 1, ml: '80px' }}>
+              학회 태그(실선) · 자유 태그(점선). 선택한 태그 중 하나라도 가진 상품을 보여줍니다(OR).
+            </Typography>
+          </>
         )}
+
+        <Divider sx={{ my: 2 }} />
+
+        {/* 상품명 검색 — 조건을 고른 뒤 마지막에 좁히는 단계라 맨 아래. 로컬 state+debounce(검색 input 격리). */}
+        <ProductSearchBar
+          onSearch={setSearchTerm}
+          delay={60}
+          label="상품명 검색"
+          placeholder="상품명으로 검색 (검사군명·약어 포함)"
+          size="small"
+          sx={{ mb: 0, width: '100%' }}
+          resetKey={searchResetKey}
+        />
       </SectionCard>
 
       {selectedCount > 0 && hasPermission('products:edit') && (

@@ -2,7 +2,8 @@
 
 > 이 시트는 상품 관리 화면의 정보·기능·데이터 구조의 단일 진실 소스다.
 > 시안과 실서비스 구현은 이 시트의 모든 항목을 1:1로 반영해야 한다.
-> 마지막 갱신: 2026-10-19 **필터 바 재설계(사양)**(메인 Claude, product-cpo 권고·건우님 확정). 단일 선택 빠른 필터 카드 8장(`productQuickFilter`)을 폐지하고 속성별 패싯 필터로 교체: 카테고리(도서/검사/도구/미확인)·할인 여부·개별 할인·인기 상품·신상품·온라인코드(미확인/Y/N) 이미지 등록 Y/N·검색 맨 아래·미확인 끝 배치 포함, 각 단일 선택(전체/Y/N), 속성 간 AND, 태그(학회 ∪ 기존 자유 태그) 체크박스 OR, 옵션별 건수 미표시(합계만), "전체 상품" 카드 → 상시 "필터 초기화" 버튼. 온라인코드 미확인의 검사 한정 조건 제거. 실 코드 미변경(사양만 — 시안 후 구현). §필터 바 절 신설(구 §통계 카드·§검색·필터 카드 대체).
+> 마지막 갱신: 2026-10-19 **필터 바 재설계(실 구현)**(메인 Claude, 시안 `ProductFilterBarPreview` 1:1 이식). `ProductManagementPage.jsx`의 빠른 필터 카드 8장(`renderQuickFilterCard`·`productQuickFilter`·카드 집계 memo 5종)과 구 검색·태그 SectionCard를 폐지하고 필터 바 SectionCard 1장으로 교체. state: `productQuickFilter` → `facets`(`DEFAULT_FACETS` = isDiscountable·discountOverride·isPopular·isNew·hasImage·onlineCode, 각 `'all'|'y'|'n'`, 온라인코드만 `'unknown'` 추가) + 카테고리는 기존 `selectedCategory`(값에 `'미확인'` 추가, 그룹 뷰 분기 공유). 판정 로직은 순수 함수 `utils/productFilters.js`(`DEFAULT_FACETS`·`isFacetsActive`·`matchesCategory`·`matchesFacets`·`matchesTags`·`buildTagOptions`)로 분리. 필터: 카테고리 미확인=`!PRODUCT_CATEGORIES.includes(category)`, Y/N 속성 AND, 이미지=`image_filename` trim 유무, 온라인코드 3상태 그대로(**검사 한정 조건 제거**, undefined=NULL 취급), 태그 OR. 태그 옵션: `societies.name` 정렬 앞 + 나머지 자유 태그 정렬 뒤(`societyTagSet` — 학회 실선·자유 점선 테두리). UI: 모듈 스코프 `FacetToggle`(ToggleButtonGroup exclusive, 카테고리만 clearable) + 우측 상단 "N개 표시 중"(필터 있을 때) + 상시 "필터 초기화"(필터 없으면 disabled) → 카테고리(+검사 선택 시 "검사군 추가", `canEdit`) → Y/N 2열 그리드 → 태그(체크박스 칩) → 상품명 검색 맨 아래(`ProductSearchBar` 로컬 state+debounce 60ms 유지). `hasFilters`에 `isFacetsActive(facets)` 반영, `handleResetFilters`에 `setFacets(DEFAULT_FACETS)`, 1페이지 리셋 useEffect deps에 `facets`. 미사용 import(TrendingUp·HelpOutline·MenuBook·Science·Build 아이콘, `CATEGORY_COLORS`·`CATEGORY_KEY_BY_LABEL`) 정리. 상품 표·그룹 뷰·액션바 무변경. theme.js 무수정·MUI만·존재 토큰(`theme.gray[50/300]`·palette.primary)만.
+> 이전 갱신: 2026-10-19 **필터 바 재설계(사양)**(메인 Claude, product-cpo 권고·건우님 확정). 단일 선택 빠른 필터 카드 8장(`productQuickFilter`)을 폐지하고 속성별 패싯 필터로 교체: 카테고리(도서/검사/도구/미확인)·할인 여부·개별 할인·인기 상품·신상품·온라인코드(미확인/Y/N) 이미지 등록 Y/N·검색 맨 아래·미확인 끝 배치 포함, 각 단일 선택(전체/Y/N), 속성 간 AND, 태그(학회 ∪ 기존 자유 태그) 체크박스 OR, 옵션별 건수 미표시(합계만), "전체 상품" 카드 → 상시 "필터 초기화" 버튼. 온라인코드 미확인의 검사 한정 조건 제거. 실 코드 미변경(사양만 — 시안 후 구현). §필터 바 절 신설(구 §통계 카드·§검색·필터 카드 대체).
 > 이전 갱신: 2026-08-25 **QA P0-3 — 그룹 뷰 전체 선택 오삭제 결함 픽스**(frontend-engineer, tech-cto 위임). 헤더 전체 선택 체크박스(`handleToggleAll`·`allPageSelected`·`somePageSelected`)는 평면 슬라이스 `displayedProducts`를 참조하는데, 검사 그룹 뷰는 `displayedGroups`(검사군 헤더)를 렌더하므로 그룹 뷰에서 전체 선택을 누르면 **화면에 안 보이는(접힌 검사군의) 평면 상위 50개 상품**이 선택돼 "선택 삭제"까지 이어질 수 있었다. **수정(최소 안전)**: ① 그룹 뷰(`groupViewActive`)에선 헤더 전체 선택 `Checkbox`를 렌더하지 않는다 — `TableCell`(padding="checkbox")은 유지하고 내부를 `{!groupViewActive && <Checkbox .../>}`로 조건부(빈 셀로 컬럼 정렬 보존). 평면 뷰(도서·도구·검색 결과·전체)의 전체 선택은 무변경. ② 그룹 뷰에서 잔여 선택(평면 뷰에서 선택 후 검사 탭 전환)이 남아 일괄 액션 바가 뜰 때, `selectedCount`(ActionSlot leading) 아래 캡션 1줄 **"선택된 상품이 현재 화면에 보이지 않을 수 있습니다."**(`groupViewActive && selectedCount>0`, `caption`/`text.secondary`)를 노출 — 조용한 오삭제 방지. 옵션 하위 행의 개별 체크박스(`ProductRow`)는 기존대로 유지. **그룹-aware 전체 선택 모델은 승인 대기 중인 검사군 팬아웃 편집 트랙 선결 과제로 이관(여기서 선점 안 함)**. 검증: vitest 294 passed(신규 실패 0)·기존 OrderDetailModal 2 실패 무관(diff 0)·ProductManagementPage lint 0·build. §검사군 그룹 뷰·§액션·§선택 시 액션바 절 갱신.
 > 이전 갱신: 2026-08-25 **개별 상품 폼에 이미지 첨부**(frontend-engineer, tech-cto 위임). 상품 추가/수정 다이얼로그 '비고' 아래에 **"상품 이미지" 섹션** 신설: 72px 미리보기(`ProductImagePreview` — 로드 실패·미등록 시 "이미지 없음" 문구, `key={image_filename}`로 파일명 변경 시 remount) + **[이미지 첨부]**(`PhotoLibraryIcon`, 단일 파일 `<input accept="image/*" hidden>`) + **[제거]**(`image_filename=''`) + 안내 "JPG·PNG·WEBP·GIF, 1MB 이하(200KB 이하 권장). 파일명은 자동으로 정리됩니다." **권한 `products:edit`**. **파일명 처리(일괄과 다르게)**: 개별 첨부는 엑셀 '이미지' 열과 맞출 필요가 없어 원본 파일명을 강제하지 않고 **안전하게 새로 짓는다** — `utils/productImageName.js`의 순수함수 `buildProductImageFilename({originalName, productCode, productId})` = `p{안전화한 코드/ID}-{timestamp}.{원본 확장자소문자}`(SAFE_IMAGE_FILENAME 통과 보장). **→ 한글 파일명 사진도 그대로 첨부 가능**(거부 안 함, 운영자 친화). 확장자 화이트리스트 `jpg/jpeg/png/webp/gif`(그 외 null 거부), 크기 하드상한 `MAX_IMAGE_BYTES`=1MB(200KB는 권장 안내만). **동작**: 첨부 즉시 `uploadProductImage`로 버킷 업로드(`new File([file], safeName)`로 리네임)하되 `image_filename` 반영은 폼 상태로만 — 저장 취소 시 DB 미반영(업로드 파일은 버킷 잔류, 다른 상품 참조 가능성 있어 롤백 안 함·무해). **`handleSave` image_filename 정규화 수정**: `''`(제거) → 편집이면 NULL 명시 저장(기존 이미지 지움)·추가면 키 제외 / null·undefined → 키 제외(컬럼 미적용 graceful, PGRST204 재시도 유지). 신규 추가 다이얼로그도 동일 컴포넌트라 자동 반영. 검증: vitest 280 passed(신규 `productImageName.test.js` 11 — 한글 원본→안전명·확장자 보존/거부·폴백)·기존 OrderDetailModal 2 실패 무관(diff 0)·lint 0·build. §상품 추가/수정 폼·데이터 모델 image_filename 절 갱신.
 > 이전 갱신: 2026-08-25 **목록 다운로드=양식 v2 서식으로**(frontend-engineer, tech-cto 위임). `handleDownloadExcel`이 SheetJS `json_to_sheet`(맨 시트·서식 없음)로 만들던 것을, **양식 v2 정적 템플릿을 ExcelJS로 열어 예시 9행을 지우고 전체 상품을 채워** 내보내도록 변경(안내문 1행·색상 헤더·검사 전용 열 색·틀고정 A3·자동필터 서식 그대로). 선례 `utils/depositResolution`·`paymentReceipt` 정적 양식 패턴. 로직은 `utils/productExcelExport.js` 신설로 분리: `buildProductRows`(순수 — 상품→20열 AOA)·`fillProductListWorksheet`(ExcelJS 채움)·`exportProductList`(fetch→채움→다운로드). 예시 행 제거는 ExcelJS 4.4.0 `spliceRows` 말단 대량삭제 버그(splice(3,9)→무동작) 회피 위해 **아래에서부터 1행씩 삭제**. 데이터 행 서식은 예시 3행 셀에서 캡처해 상속(맑은 고딕 10·E열 `#,##0`·N~T열 옅은 채움 theme3/tint 0.85). 자동필터 `A2:T{2+행수}` 갱신·틀고정 A3 유지·파일명 `상품_목록.xlsx`. 값 포맷·열 순서는 파서 규약 그대로(라운드트립: 안내문 1행→`detectHeaderRow` 2행 탐지→20열·검사·평면 값 복원 단위 테스트). 컴포넌트에서 `XLSX`는 업로드 파싱(`XLSX.read`)에만 잔존. 검증: vitest 269 passed(신규 11 `productExcelExport.test.js`)·기존 OrderDetailModal 2 실패 무관(diff 0)·lint 0·build. §액션·§엑셀 컬럼 매핑 갱신.
@@ -130,26 +131,26 @@
 > **건수 표시(확정):** 옵션별 건수는 **표시하지 않는다**(조합마다 수치가 달라져 혼란). 상단 "{totalFiltered}개 표시 중" 합계만 노출.
 > **제약:** MUI 컴포넌트만(ToggleButtonGroup/Chip/Checkbox/Button), theme.js 무수정, AI 시그니처(그라데이션·컬러 인디케이터바·가짜 통계) 금지. PC 전용 화면.
 
-- [ ] (삭제) **"전체 상품" 카드 → "필터 초기화" 버튼**으로 대체(outlined, `RestartAltIcon`). 상시 노출, 걸린 필터가 없으면 disabled. `handleResetFilters` 재사용 — 검색어·카테고리·모든 Y/N 속성·태그를 전부 초기화.
-- [ ] **배치 순서(2026-10-19 건우님):** ① 우측 상단 "N개 표시 중" + 필터 초기화 → ② 카테고리 → ③ Y/N 속성 → ④ 태그 → ⑤ **상품명 검색(맨 아래)**. 조건으로 거른 뒤 마지막에 이름으로 좁히는 흐름.
-- [ ] **'미확인' 선택지는 언제나 맨 오른쪽(끝)** — 카테고리·온라인코드 공통.
-- [ ] 표시 건수: "{totalFiltered}개 표시 중" — 필터가 걸렸을 때 노출(현행 유지).
-- [ ] **카테고리**: 단일 선택 [도서] [검사] [도구] [미확인] (미선택=전체, 미확인 끝).
+- [x] (삭제) **"전체 상품" 카드 → "필터 초기화" 버튼**으로 대체(outlined, `RestartAltIcon`). 상시 노출, 걸린 필터가 없으면 disabled. `handleResetFilters` 재사용 — 검색어·카테고리·모든 Y/N 속성·태그를 전부 초기화.
+- [x] **배치 순서(2026-10-19 건우님):** ① 우측 상단 "N개 표시 중" + 필터 초기화 → ② 카테고리 → ③ Y/N 속성 → ④ 태그 → ⑤ **상품명 검색(맨 아래)**. 조건으로 거른 뒤 마지막에 이름으로 좁히는 흐름.
+- [x] **'미확인' 선택지는 언제나 맨 오른쪽(끝)** — 카테고리·온라인코드 공통.
+- [x] 표시 건수: "{totalFiltered}개 표시 중" — 필터가 걸렸을 때 노출(현행 유지). 숫자만 `text.primary` 굵게.
+- [x] **카테고리**: 단일 선택 [도서] [검사] [도구] [미확인] (미선택=전체, 미확인 끝).
   - '미확인' = `category`가 도서·검사·도구 셋 중 어느 값도 아닌 상품(NULL·빈 문자열·그 외 값). 2026-10-19 기준 0건 — 엑셀 오입력·분류 누락 방어용 가시성 세이프가드(평소 0건이 정상).
   - **'검사' 선택 시 동작 보존**: 검사군 그룹 뷰(`groupViewActive`)가 유일 뷰, 필터 바에 "검사군 추가" 버튼 노출.
-- [ ] **할인 여부**(`is_discountable`): 전체 / Y / N
-- [ ] **개별 할인**(`discount_override != null`): 전체 / Y / N
-- [ ] **인기 상품**(`is_popular`): 전체 / Y / N
-- [ ] **신상품**(`is_new`): 전체 / Y / N — (신규: 현행엔 신상품 필터가 없었음)
-- [ ] **이미지 등록**(`image_filename`): 전체 / Y(값 있음) / N(NULL·빈 문자열) — (2026-10-19 신규, 건우님)
-- [ ] **온라인코드**(`includes_online_code`): 전체 / Y(true) / N(false) / 미확인(NULL) — 미확인 끝.
+- [x] **할인 여부**(`is_discountable`): 전체 / Y / N
+- [x] **개별 할인**(`discount_override != null`): 전체 / Y / N
+- [x] **인기 상품**(`is_popular`): 전체 / Y / N
+- [x] **신상품**(`is_new`): 전체 / Y / N — (신규: 현행엔 신상품 필터가 없었음)
+- [x] **이미지 등록**(`image_filename`): 전체 / Y(값 있음) / N(NULL·빈 문자열) — (2026-10-19 신규, 건우님)
+- [x] **온라인코드**(`includes_online_code`): 전체 / Y(true) / N(false) / 미확인(NULL) — 미확인 끝.
   - 필드값 3상태 그대로 거른다(구 '미확인' 카드의 `category='검사'` 한정 조건은 **제거**). 비검사 상품은 엑셀 파서가 false로 강제하므로 미확인은 실데이터상 사실상 검사에만 존재.
-- [ ] **태그**: 체크박스 다중 선택, 매칭 **OR**(선택한 태그 중 하나라도 가진 상품).
+- [x] **태그**: 체크박스 다중 선택, 매칭 **OR**(선택한 태그 중 하나라도 가진 상품).
   - 옵션 소스 = **학회 관리의 학회 목록(`societies.name`, 예 TEST … 한국심리학회) ∪ 기존 상품 자유 태그(`products.tags`)**. 학회명을 앞쪽에, 나머지 자유 태그를 뒤쪽에 정렬. societies는 `getSocieties()`(`api/events.js`) — SocietyManagementDialog·EventManagementPage와 동일 소스.
-- [ ] 상품명 검색(맨 아래): `ProductSearchBar`(로컬 state + debounce) 그대로 유지 — 메모리 규칙(검색 input 격리, controlled 최상단 state 금지). 검색 대상(상품명 + 검사군 name·abbr) 무변경.
-- [ ] `hasFilters` = 검색어 ∨ 카테고리 ∨ Y/N 속성 중 하나라도 'all' 아님 ∨ 태그 선택 1개 이상.
+- [x] 상품명 검색(맨 아래): `ProductSearchBar`(로컬 state + debounce) 그대로 유지 — 메모리 규칙(검색 input 격리, controlled 최상단 state 금지). 검색 대상(상품명 + 검사군 name·abbr) 무변경.
+- [x] `hasFilters` = 검색어 ∨ 카테고리 ∨ Y/N 속성 중 하나라도 'all' 아님 ∨ 태그 선택 1개 이상.
 
-> 구현 참조(현행 코드 위치): 필터 로직 `filteredProducts`(line 495~520), 카드 집계(line 463~478, 신규 모델에서 카테고리 외 집계 불필요), `availableTags`(line 481~485), `hasFilters`(line 582), `handleResetFilters`(line 1093), 빠른 필터 카드 Box(line 1429~1484), 검색·태그 SectionCard(line 1486~1540), `groupViewActive`(`selectedCategory==='검사'`).
+> 구현 위치(2026-10-19 구현 후): 판정 로직 `utils/productFilters.js`(+ `productFilters.test.js` 12건), 페이지 상수 `CATEGORY_FILTER_OPTIONS`·`YN_OPTIONS`·`ONLINE_CODE_OPTIONS`(파일 상단), `FacetToggle`(모듈 스코프 컴포넌트), `facets` state, `availableTags`·`societyTagSet`(useMemo → `buildTagOptions`), 필터 로직 `filteredProducts`, `hasFilters`, `handleResetFilters`·`setFacet`, 필터 바 SectionCard(주석 `필터 바(A6 §필터 바 2026-10-19)`), `groupViewActive`(`selectedCategory==='검사'`). 구 빠른 필터 카드(`renderQuickFilterCard`)·카드 집계 memo(`totalProducts`·`totalDiscountableCount`·`totalOverrideCount`·`totalPopularCount`·`totalOnlineCodeUnknownCount`·`categoryCounts`) 삭제.
 > **범위 밖(별도 트랙, tech-cto 소관):** 이번 입금결의서 불일치의 실제 원인은 상품이 아니라 `order_items` 스냅샷(category·product_name) 누락 — 어드민 신규 주문 등록(NewOrderModal)이 저장하지 않음. 이 필터로는 탐지되지 않는다. NewOrderModal 스냅샷 저장·입금결의서 미분류 경고·과거 주문 백필은 별도로 진행.
 
 ### 선택 시 액션바 (line 738-768, `selectedCount > 0` 이고 `products:edit` 권한 있을 때)
@@ -224,11 +225,11 @@
 
 ## 액션·기능 (누락 금지)
 
-- [ ] 검색어 입력 → 페이지 1 리셋 + 클라이언트 필터링
-- [ ] 카테고리 카드 클릭 → `selectedCategory` 토글
-- [ ] 빠른 필터 카드 클릭 → `productQuickFilter` 토글 (`discountable`/`popular`/`onlineUnknown`)
-- [ ] 태그 칩 클릭 → 다중 선택 토글
-- [ ] 초기화 → 검색·카테고리·빠른필터·태그 모두 리셋
+- [x] 검색어 입력 → 페이지 1 리셋 + 클라이언트 필터링
+- [x] 카테고리 토글 [도서|검사|도구|미확인] → `selectedCategory` 단일 선택(활성 재클릭 시 전체로 해제) (2026-10-19)
+- [x] 속성 토글(할인 여부·개별 할인·인기 상품·신상품·이미지 등록 [전체|Y|N], 온라인코드 [전체|Y|N|미확인]) → `facets` 속성별 단일 선택, 속성 간 AND (2026-10-19, 구 `productQuickFilter` 카드 대체)
+- [x] 태그 체크박스 칩 클릭 → 다중 선택 토글(OR)
+- [x] 필터 초기화(상시, 필터 없으면 disabled) → 검색·카테고리·속성·태그 모두 리셋 + 1페이지
 - [ ] 체크박스 전체 선택/해제 (평면 뷰 현재 페이지 기준). **(2026-08-25 QA P0-3) 검사 그룹 뷰에선 헤더 전체 선택 체크박스를 렌더하지 않음** — 그룹 뷰는 검사군 헤더를 렌더하는데 `handleToggleAll`이 평면 슬라이스(`displayedProducts`)를 참조해 안 보이는 상품을 선택하는 오삭제 위험. 빈 셀로 정렬만 유지. 그룹-aware 전체 선택은 팬아웃 편집 트랙 선결 과제.
 - [ ] 체크박스 개별 토글 (평면 행·펼친 옵션 하위 행 공통)
 - [ ] 상품 추가 다이얼로그 (line 912-947): 상품명·상품코드·카테고리·하위카테고리·가격·비고·할인가능·인기·신상품·**온라인코드 포함(3상태)**·태그
@@ -317,11 +318,11 @@
 ## 필터·뷰 모드
 
 - 검색어 (상품명 부분 일치)
-- 카테고리 단일 선택 (도서/검사/도구) — 카드 클릭으로 토글
+- 카테고리 단일 선택 (도서/검사/도구/미확인) — 필터 바 토글(2026-10-19). 미확인 = 도서·검사·도구 외 값
 - **검사군 그룹 뷰 (2026-07-02 개편)**: `selectedCategory==='검사'`이면 **무조건 그룹 뷰**(토글 폐지, `groupViewActive = selectedCategory==='검사'`). 도서·도구·전체는 평면. 그룹 뷰 = 조회+수정(검사군·옵션 인라인 관리), 페이지네이션 숨김. §검사군 그룹 뷰 절 참조.
-- 빠른 필터: discountable | popular | onlineUnknown | null
-  - **onlineUnknown (2026-08-18)**: `includes_online_code IS NULL AND category='검사'`. 미확인 검사 상품을 모아 일괄 확정하는 진입점(퀵필터 카드 "온라인코드 미확인"). 온라인코드는 사실상 검사 상품에만 딸리므로 검사군으로 좁힘
-- **노출 필터 — (2026-07-02 신규, 1차 선택)**: `productQuickFilter`에 `hidden`(숨김만) 추가 검토, 또는 검색·필터 카드에 "숨김 포함 N개" 표시 + 별도 토글. **기본은 전체 노출**(숨김 상품도 표에 보임 — dim+칩으로 구분). 운영자가 "숨김 상품만 모아보기"를 원할 때만 필터. **구현 우선순위 낮음** — is_active 상태칩·폼 Switch가 P0, 필터는 P1.
+- ~~빠른 필터: discountable | popular | onlineUnknown | null~~ — **(2026-10-19 폐지)** 속성별 `facets`로 교체: isDiscountable·discountOverride·isPopular·isNew·hasImage(`'all'|'y'|'n'`) + onlineCode(`'all'|'y'|'n'|'unknown'`), 속성 간 AND. §필터 바 참조
+  - 온라인코드 미확인 = `includes_online_code IS NULL`(undefined 포함). **구 `category='검사'` 한정 조건 제거**(2026-10-19) — 비검사는 엑셀 파서가 false 강제라 실데이터상 사실상 검사에만 존재
+- **노출 필터 — (2026-07-02 신규, 1차 선택)**: (2026-10-19 이후라면 `facets`에 노출 여부 Y/N 추가로 검토) `productQuickFilter`에 `hidden`(숨김만) 추가 검토, 또는 검색·필터 카드에 "숨김 포함 N개" 표시 + 별도 토글. **기본은 전체 노출**(숨김 상품도 표에 보임 — dim+칩으로 구분). 운영자가 "숨김 상품만 모아보기"를 원할 때만 필터. **구현 우선순위 낮음** — is_active 상태칩·폼 Switch가 P0, 필터는 P1.
 - 태그 다중 선택 (OR 매칭)
 - 정렬: 인기 우선 → 이름 가나다순(고정, 사용자 선택 없음)
 - 페이지당 항목 수: 10/25/50/100 (기본 50)
@@ -351,11 +352,12 @@
 4. **카테고리·하위 카테고리는 별도 필드.** 가로 배치이지만 입력은 두 칸으로 분리됨.
 5. **태그·하위카테고리·notes는 nullable.** 시안에서 항상 값이 있는 것처럼 그리면 빈 상태 처리가 빠진다.
 6. **전체 삭제는 받아쓰기 확인 ("삭제합니다") + 위험한 액션 색 처리.** 자주 하는 일과 다른 모양·색·위치 원칙(01 원칙 3).
-7. **통계 카드 6장이 일렬로 배치.** 시안이 3장만 보여주면 카테고리 카드 3종이 사라진다.
+7. ~~**통계 카드 6장이 일렬로 배치.**~~ — **(2026-10-19 폐지)** 필터 바로 교체. 대신 카테고리 4종(도서/검사/도구/미확인)·속성 6종·태그·검색이 모두 필터 바에 있어야 한다(누락 금지).
 8. **그라데이션 배경은 현재 코드에 있지만 신 디자인 시스템에서는 제거 대상(CLAUDE.md E항).** 시안에서 그라데이션을 유지하지 말 것.
 
 ## 변경 이력
 
+- 2026-10-19 **필터 바 재설계(실 구현)**(메인 Claude, 시안 `ProductFilterBarPreview` 1:1 이식). `ProductManagementPage.jsx`의 빠른 필터 카드 8장(`renderQuickFilterCard`·`productQuickFilter`·카드 집계 memo 5종)과 구 검색·태그 SectionCard를 폐지하고 필터 바 SectionCard 1장으로 교체. state: `productQuickFilter` → `facets`(`DEFAULT_FACETS` = isDiscountable·discountOverride·isPopular·isNew·hasImage·onlineCode, 각 `'all'|'y'|'n'`, 온라인코드만 `'unknown'` 추가) + 카테고리는 기존 `selectedCategory`(값에 `'미확인'` 추가, 그룹 뷰 분기 공유). 판정 로직은 순수 함수 `utils/productFilters.js`(`DEFAULT_FACETS`·`isFacetsActive`·`matchesCategory`·`matchesFacets`·`matchesTags`·`buildTagOptions`)로 분리. 필터: 카테고리 미확인=`!PRODUCT_CATEGORIES.includes(category)`, Y/N 속성 AND, 이미지=`image_filename` trim 유무, 온라인코드 3상태 그대로(**검사 한정 조건 제거**, undefined=NULL 취급), 태그 OR. 태그 옵션: `societies.name` 정렬 앞 + 나머지 자유 태그 정렬 뒤(`societyTagSet` — 학회 실선·자유 점선 테두리). UI: 모듈 스코프 `FacetToggle`(ToggleButtonGroup exclusive, 카테고리만 clearable) + 우측 상단 "N개 표시 중"(필터 있을 때) + 상시 "필터 초기화"(필터 없으면 disabled) → 카테고리(+검사 선택 시 "검사군 추가", `canEdit`) → Y/N 2열 그리드 → 태그(체크박스 칩) → 상품명 검색 맨 아래(`ProductSearchBar` 로컬 state+debounce 60ms 유지). `hasFilters`에 `isFacetsActive(facets)` 반영, `handleResetFilters`에 `setFacets(DEFAULT_FACETS)`, 1페이지 리셋 useEffect deps에 `facets`. 미사용 import(TrendingUp·HelpOutline·MenuBook·Science·Build 아이콘, `CATEGORY_COLORS`·`CATEGORY_KEY_BY_LABEL`) 정리. 상품 표·그룹 뷰·액션바 무변경. theme.js 무수정·MUI만·존재 토큰(`theme.gray[50/300]`·palette.primary)만. 검증: eslint(변경 파일 0 error)·vitest 369 passed(신규 `productFilters.test.js` 12 + 실 페이지 렌더 `ProductManagementPage.filterBar.test.jsx` 7 — AND 조합·카테고리 미확인·온라인코드 미확인 비검사 포함·태그 OR·학회 앞 정렬·초기화·검사 그룹 뷰/검사군 추가/재클릭 해제)·vite build 통과.
 - 2026-07-03 **검사군 상세 편집 모달 실 구현 + ⋮ 메뉴 재편 (실 코드 변경 — frontend-engineer, tech-cto 위임)**. 신규 `TestGroupEditorModal.jsx`로 검사군(상위)+옵션(products) CRUD·순서·이동·삭제를 하나의 큰 모달에 통합. **폐지**: 검사명·약어 편집 다이얼로그(`tgDialog`)·미리보기 카드, 옵션 편집 다이얼로그(`tgDetail`·`handleOpenTgDetail`·`handleTgDetailOptionChange`·`handleMoveOption`·`handleSaveOptions`), 분리 다이얼로그(`tgSplit*`·`handleOpenSplit`·`handleToggleSplitOption`·`handleSplit`), `handleSaveTestGroup`. 관련 state(`tgDialog`·`tgSaving`·`tgDetail`·`tgSplitOpen`·`tgSplitSelected`·`tgSplitForm`) 제거, `tgEditor`(모달 open/group) 신설. **⋮ 메뉴 재편**: [옵션 편집·분리·병합·삭제] 4항목 → **[검사군 상세 편집·병합·삭제] 3항목**(옵션 편집·분리는 모달 흡수, 병합은 모달 밖 유지=`mergeTestGroups`). 헤더 편집 아이콘·"검사군 추가" 버튼 모두 모달 진입으로. **모달**: 상단(검사명·약어·정렬·노출 Switch) + 옵션 인라인 테이블(순서 ▲▼·옵션명·말머리·상품코드·가격·공용·노출·⋮ 이동/삭제) + 하단(옵션 추가·저장/취소). 신규 옵션 name 자동조합 `"{검사명} {옵션명}"`(공백 1칸, 편집 가능·nameTouched 중단, 기존 name 미덮어씀). 옵션 옮기기(라디오 A=`splitTestGroup`/B=`moveOptionsToGroup`, 확인 문구 3블록). 상품코드 중복 검증(모달 내부+전체 products) 저장 차단. 옵션 삭제=`deleteProductOption`(master 전용, edit는 disable+안내, 확인 문구 "판매중지는 노출 토글·삭제 불가역·과거 주문 보존"). 드래그앤드롭·undo 제외. state 완전 격리(214행 렌더 무영향)·Autocomplete 내장 필터(controlled 렉 방지). **API**: `testGroups.js`에 `createProductOption`·`deleteProductOption`(42501→권한 안내)·`moveOptionsToGroup`·`saveTestGroupWithOptions`(backend 병렬 신설, 순차+PGRST204 graceful, order_items 불변). ⋮ "항목 수 불변" 제약 폐기. theme.js 무수정·MUI만(Dialog/Table/Switch/Checkbox/RadioGroup/Autocomplete)·AI 시그니처 없음·권한 가드 보존. **검증**: `npx eslint`(변경 파일 신규 위반 0)·`vite build`·`vitest` 113 passed. §검사군 상세 편집 모달 절 신설, §검사명·약어/옵션 순서·말머리 절 폐지 표시, §옵션 옮기기·⋮ 메뉴 절 갱신.
 - 2026-07-03 **옵션 옮기기(분리·이동) 사양 — 분리 다이얼로그 일반화 (사양만 갱신, 실 코드 미변경 — product-designer, 건우님 확정)**. 기존 §분리 절을 §옵션 옮기기(분리·이동) 절로 일반화. (1) **⋮ 메뉴 라벨** "분리 (옵션을 새 검사군으로)" → **"옵션 옮기기 (분리·이동)"** — 라벨만 변경, 항목 수 불변(옵션 편집·옵션 옮기기·병합·삭제, 6번째 신설 금지). (2) **다이얼로그 상단 목적지 라디오 2택**(`RadioGroup`, 기본 A=기존 동작): (A) 새 검사군으로 = 기존 검사명·약어 `TextField` UI 그대로(`splitTestGroup`) / (B) 기존 검사군으로 = `Autocomplete` 1개(`fetchTestGroups` 214개, 옵션 라벨 "약어 · 검사명", 약어+검사명 검색, **현재 검사군 제외**)로 선택 → 선택 옵션 `test_group_id`를 기존 id로 UPDATE(동종 연산, 새 검사군 생성 없음). (3) **옵션 체크박스 다중 선택**(`tgSplitSelected`) 기존 재사용. (4) **확인 문구 3블록**(정직·자체완결): 이동("옵션 N개를 '{대상}'(으)로 옮깁니다. 진열이 즉시 바뀝니다.") + 원래 검사군 0개 경고("남는 옵션이 없어집니다. 빈 검사군은 진열 미표시·⋮에서 직접 삭제") + 되돌리는 법("반대로 다시 옮기면 됩니다."). (5) **안 함(엄수)**: undo 전면 제외 / 빈 검사군 자동삭제 제외(유지+경고만) / 드래그앤드롭 제외. 근거: 자동 초벌 오분류 교정을 단일 진입점으로 흡수 — "분리 vs 이동 vs 병합" 구분 부담을 라디오 1개로 줄임(연 8일·초기 시드 정비 집중, 학회 중 freeze). **제약**: theme.js 무수정·MUI만(Dialog/Checkbox/Autocomplete/Chip/RadioGroup 재사용)·AI 시그니처 금지·`products:edit` 가드 보존·order_items 불변. **frontend 결정 필요(tech-cto 소관)**: 신규 API `moveOptionsToGroup(targetGroupId, productIds)`(기존 검사군 id로 `test_group_id` UPDATE·최소) vs `splitTestGroup` 확장 — 제품 요구는 "기존 검사군 id로 UPDATE하는 동종 연산" 자체일 뿐, 함수 형태는 엔지니어링 판단. 상단 요약·§검사군 관리 ⋮ 메뉴·§옵션 옮기기 절 신설, §분리 대체.
 - 2026-07-03 **페이지 렌더 성능 최적화 (실 코드 변경 — frontend-engineer, 건우님 실동작 피드백 2건 동일 근본원인)**. 증상: (1) 검색 debounce 250ms 딜레이 답답(오타 수정 시 결과 지연), (2) 모든 탭(전체/할인/인기/검사/도서/도구) 전환마다 렉. 원인: 2,300줄 단일 컴포넌트라 state 변경마다 상품 표 전량 재렌더 + 상품 행이 memo 안 돼 안 바뀐 행까지 다시 그림. **수정(정보 구조·기능·필드 전부 불변, memo/useCallback 외과 도입):** (1) 상품 행을 `ProductRow` `React.memo` 컴포넌트로 추출(컴포넌트 밖 top-level) — 평면 행과 검사군 옵션 하위 행이 공유(props `isOption`으로 상품명 셀만 분기: 평면=`product.name`, 옵션=말머리+형태명+`pl:4` 들여쓰기). `renderProductCells`도 top-level 순수 함수로 이동해 `ProductRow` 내부 흡수 — memo 대상이 셀 전체(카테고리·소분류칩·가격·비고·상태칩·태그·편집버튼) 포함해야 skip이 온전. props(`product`·`selected`·`canEdit`·`isOption`·`subColorByName`·`theme`·`onToggle`·`onEdit`) 동일 시 재렌더 skip. (2) `ProductThumb`를 `React.memo`로 — `filename`·`name` 같으면 이미지 셀 재렌더 skip. (3) 핸들러 `useCallback` 안정화(`handleOpen`·`handleToggleOne`·`handleToggleGroupExpand`) — 참조 고정으로 memo 효과 유지. `subColorByName`(useMemo)·`theme`(useTheme)는 이미 안정. **skip 근거:** `filteredProducts`가 `[...list].sort()`로 새 배열을 만들어도 개별 상품 객체는 `allProducts` 원본 참조 유지 → 탭 전환·검색 시 표시되는 행 중 동일 객체는 얕은 비교 통과로 재렌더 skip. (4) A6 `ProductSearchBar delay={60}`(250→60ms) — 렌더가 가벼워져 오타 수정 타이핑 매끄럽고 결과 즉시 반영. **C1(`ProductSelectionStep.jsx`)의 `ProductSearchBar`는 무변경(`delay` 미지정=기본 250ms 유지) — C1은 렉 없어 현행 유지.** 통계 카드·필터바는 이미 useMemo(`totalDiscountableCount`·`totalPopularCount`·`categoryCounts`·`availableTags`)라 추가 조치 불요(과잉 최적화 방어). **기능 전부 불변(개별 수정·엑셀 다운로드/업로드·검사군 인라인 관리·is_active·페이지네이션·권한 가드·검사군 묶어보기 뷰)·order_items 불변·theme.js 무수정·MUI만·AI 시그니처 없음.** 검증: `npm run lint`(변경 파일 신규 위반 0, 기존 send-alimtalk 9에러 무관)·`npm run build` 통과·`vitest` 113 passed 유지.
