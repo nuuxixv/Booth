@@ -48,7 +48,7 @@ import { percentToRateNullable, rateToPercentNullable } from '../utils/pricing';
 import { parseBool, parseProductSheet } from '../utils/productExcel';
 import { exportProductList } from '../utils/productExcelExport';
 import {
-  DEFAULT_FACETS, UNKNOWN_CATEGORY, isFacetsActive,
+  DEFAULT_FACETS, PRODUCT_CATEGORIES, isFacetsActive,
   matchesCategory, matchesFacets, matchesTags, buildTagOptions,
 } from '../utils/productFilters';
 import { buildProductImageFilename, MAX_IMAGE_BYTES } from '../utils/productImageName';
@@ -63,8 +63,8 @@ const PARENT_CATEGORIES = ['검사', '도서', '도구'];
 const DELETE_ALL_CONFIRM_TEXT = '삭제합니다';
 
 // ─── 필터 바(A6 §필터 바, 2026-10-19) — 판정 로직은 utils/productFilters ─────────
-// 카테고리 '미확인' = 도서·검사·도구 어느 값도 아님(NULL·빈 문자열·그 외). 미확인은 항상 끝.
-const CATEGORY_FILTER_OPTIONS = [...categories, UNKNOWN_CATEGORY].map((c) => ({ value: c, label: c }));
+// 카테고리: [전체|검사|도서|도구] 다중 선택(OR). '전체' = 선택 없음. 등록 시 필수값이라 '미확인' 없음.
+const ALL_CATEGORIES = 'all';
 // Y/N 속성: [전체|Y|N] — '전체'가 명시 세그먼트(기본 선택).
 const YN_OPTIONS = [
   { value: 'all', label: '전체' },
@@ -99,8 +99,8 @@ const createEmptyProduct = () => ({
 
 // 필터 바 패싯 토글(라벨 + ToggleButtonGroup exclusive). A6 §필터 바 시안(ProductFilterBarPreview) 1:1.
 // Y/N 속성은 '전체'가 명시 세그먼트 → 활성 버튼 재클릭(null)은 무시(현재 값 유지).
-// 카테고리는 clearable — 활성 버튼 재클릭 시 전체('')로 해제(미선택=전체).
-const FacetToggle = ({ label, value, options, onChange, clearable = false }) => {
+// multiple — 다중 선택(카테고리). value·onChange가 배열.
+const FacetToggle = ({ label, value, options, onChange, multiple = false }) => {
   const theme = useTheme();
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, minWidth: 0 }}>
@@ -112,13 +112,11 @@ const FacetToggle = ({ label, value, options, onChange, clearable = false }) => 
       </Typography>
       <ToggleButtonGroup
         value={value}
-        exclusive
+        exclusive={!multiple}
         size="small"
         onChange={(_, next) => {
-          if (next === null) {
-            if (clearable) onChange('');
-            return;
-          }
+          if (multiple) { onChange(next || []); return; }
+          if (next === null) return;
           onChange(next);
         }}
         sx={{
@@ -431,7 +429,7 @@ const ProductManagementPage = () => {
   const [tgEditor, setTgEditor] = useState(null);
   const [searchTerm, setSearchTerm] = useState(''); // debounce된 검색어(ProductSearchBar가 세팅)
   const [searchResetKey, setSearchResetKey] = useState(0);
-  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedCategories, setSelectedCategories] = useState([]); // 빈 배열 = 전체
   const [expandedGroups, setExpandedGroups] = useState(new Set()); // 펼친 검사군 id(및 '미분류')
   const [tgMenuAnchor, setTgMenuAnchor] = useState(null); // 검사군 헤더 행 액션 메뉴 { el, group }
   const [facets, setFacets] = useState(DEFAULT_FACETS); // 속성별 Y/N 필터(A6 §필터 바)
@@ -525,7 +523,7 @@ const ProductManagementPage = () => {
   }, [subcategories]);
 
   // 검색어·카테고리·속성·태그 변경 시 1페이지로 리셋
-  useEffect(() => { setCurrentPage(1); }, [searchTerm, selectedCategory, facets, selectedTags]);
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, selectedCategories, facets, selectedTags]);
 
   // 태그 옵션 = 학회 목록(societies.name) ∪ 상품 자유 태그(products.tags). 학회명 앞쪽, 자유 태그 뒤쪽.
   // 학회 관리 탭에 등록한 학회명을 검색 편의로 태그 옵션에 항상 노출(건우님 피드백 #3).
@@ -557,7 +555,7 @@ const ProductManagementPage = () => {
       });
     }
     list = list.filter((p) => (
-      matchesCategory(p, selectedCategory)
+      matchesCategory(p, selectedCategories)
       && matchesFacets(p, facets)
       && matchesTags(p, selectedTags)
     ));
@@ -566,13 +564,14 @@ const ProductManagementPage = () => {
       if (popDiff !== 0) return popDiff;
       return (a.name || '').localeCompare(b.name || '');
     });
-  }, [allProducts, searchTerm, selectedCategory, facets, selectedTags, tgById]);
+  }, [allProducts, searchTerm, selectedCategories, facets, selectedTags, tgById]);
 
   const totalFiltered = filteredProducts.length;
 
   // 검사군 그룹 뷰 활성 여부 — '검사' 카테고리 선택 시 무조건 그룹 뷰(디폴트이자 유일 뷰).
   // 도서·도구·전체는 평면. '전체'에서 검사 상품이 평면에 섞이는 현행은 유지(전체 조망).
-  const groupViewActive = selectedCategory === '검사';
+  // 검사군 그룹 뷰는 '검사'만 단독 선택했을 때(다른 카테고리와 함께 고르면 평면 표).
+  const groupViewActive = selectedCategories.length === 1 && selectedCategories[0] === '검사';
 
   // 검사군 그룹 뷰용 그룹핑(신규 API 없이 filteredProducts + testGroups 재사용).
   // 검사군 헤더 행(sort_order 순) + 소속 옵션. test_group_id NULL 검사 상품은 하단 "미분류" 그룹.
@@ -628,7 +627,7 @@ const ProductManagementPage = () => {
   const allPageSelected = displayedProducts.length > 0 && displayedProducts.every((product) => selectedIds.has(product.id));
   const somePageSelected = displayedProducts.some((product) => selectedIds.has(product.id));
   const selectedCount = selectedIds.size;
-  const hasFilters = Boolean(searchTerm || selectedCategory || isFacetsActive(facets) || selectedTags.length > 0);
+  const hasFilters = Boolean(searchTerm || selectedCategories.length > 0 || isFacetsActive(facets) || selectedTags.length > 0);
 
   const handleOpen = useCallback((product = null) => {
     setIsEditing(Boolean(product));
@@ -1142,7 +1141,7 @@ const ProductManagementPage = () => {
   const handleResetFilters = () => {
     setSearchTerm('');
     setSearchResetKey(k => k + 1);
-    setSelectedCategory('');
+    setSelectedCategories([]);
     setCurrentPage(1);
     setFacets(DEFAULT_FACETS);
     setSelectedTags([]);
@@ -1445,10 +1444,16 @@ const ProductManagementPage = () => {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', mb: 1.5 }}>
           <FacetToggle
             label="카테고리"
-            value={selectedCategory || null}
-            options={CATEGORY_FILTER_OPTIONS}
-            onChange={setSelectedCategory}
-            clearable
+            multiple
+            value={selectedCategories.length > 0 ? selectedCategories : [ALL_CATEGORIES]}
+            options={[{ value: ALL_CATEGORIES, label: '전체' }, ...PRODUCT_CATEGORIES.map((c) => ({ value: c, label: c }))]}
+            onChange={(next) => {
+              // '전체'를 새로 누르면 전체로 / 카테고리를 고르면 '전체' 해제 / 셋 다 고르거나 모두 해제하면 전체.
+              const picked = selectedCategories.length > 0 && next.includes(ALL_CATEGORIES)
+                ? []
+                : next.filter((v) => v !== ALL_CATEGORIES);
+              setSelectedCategories(picked.length === PRODUCT_CATEGORIES.length ? [] : picked);
+            }}
           />
           {groupViewActive && canEdit && (
             <Button
@@ -1477,6 +1482,7 @@ const ProductManagementPage = () => {
           <FacetToggle label="인기 상품" value={facets.isPopular} options={YN_OPTIONS} onChange={(v) => setFacet('isPopular', v)} />
           <FacetToggle label="신상품" value={facets.isNew} options={YN_OPTIONS} onChange={(v) => setFacet('isNew', v)} />
           <FacetToggle label="이미지 등록" value={facets.hasImage} options={YN_OPTIONS} onChange={(v) => setFacet('hasImage', v)} />
+          <FacetToggle label="판매상태" value={facets.isActive} options={YN_OPTIONS} onChange={(v) => setFacet('isActive', v)} />
           <FacetToggle label="온라인코드" value={facets.onlineCode} options={ONLINE_CODE_OPTIONS} onChange={(v) => setFacet('onlineCode', v)} />
         </Box>
 
