@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_FACETS,
-  UNKNOWN_CATEGORY,
   isFacetsActive,
   matchesCategory,
   matchesFacets,
@@ -23,18 +22,17 @@ const make = (over) => ({ ...base, ...over });
 const facets = (over) => ({ ...DEFAULT_FACETS, ...over });
 
 describe('matchesCategory', () => {
-  it('미선택이면 전부 통과', () => {
-    expect(matchesCategory(make({ category: '' }), '')).toBe(true);
+  it('미선택(빈 배열)이면 전부 통과', () => {
+    expect(matchesCategory(make({ category: '도구' }), [])).toBe(true);
   });
-  it('도서·검사·도구는 값 일치', () => {
-    expect(matchesCategory(make({ category: '검사' }), '검사')).toBe(true);
-    expect(matchesCategory(make({ category: '도서' }), '검사')).toBe(false);
+  it('한 개 선택 — 값 일치', () => {
+    expect(matchesCategory(make({ category: '검사' }), ['검사'])).toBe(true);
+    expect(matchesCategory(make({ category: '도서' }), ['검사'])).toBe(false);
   });
-  it('미확인 = 세 값 어느 것도 아님(NULL·빈 문자열·오타)', () => {
-    expect(matchesCategory(make({ category: null }), UNKNOWN_CATEGORY)).toBe(true);
-    expect(matchesCategory(make({ category: '' }), UNKNOWN_CATEGORY)).toBe(true);
-    expect(matchesCategory(make({ category: '도서 ' }), UNKNOWN_CATEGORY)).toBe(true);
-    expect(matchesCategory(make({ category: '도구' }), UNKNOWN_CATEGORY)).toBe(false);
+  it('여러 개 선택은 OR — 도서·도구', () => {
+    expect(matchesCategory(make({ category: '도서' }), ['도서', '도구'])).toBe(true);
+    expect(matchesCategory(make({ category: '도구' }), ['도서', '도구'])).toBe(true);
+    expect(matchesCategory(make({ category: '검사' }), ['도서', '도구'])).toBe(false);
   });
 });
 
@@ -55,6 +53,12 @@ describe('matchesFacets', () => {
   it('신상품 Y/N', () => {
     expect(matchesFacets(make({ is_new: true }), facets({ isNew: 'y' }))).toBe(true);
     expect(matchesFacets(make({ is_new: true }), facets({ isNew: 'n' }))).toBe(false);
+  });
+  it('판매상태 = 고객 주문서 노출(is_active), 미적용(undefined)은 Y', () => {
+    expect(matchesFacets(make({ is_active: true }), facets({ isActive: 'y' }))).toBe(true);
+    expect(matchesFacets(make({ is_active: undefined }), facets({ isActive: 'y' }))).toBe(true);
+    expect(matchesFacets(make({ is_active: false }), facets({ isActive: 'y' }))).toBe(false);
+    expect(matchesFacets(make({ is_active: false }), facets({ isActive: 'n' }))).toBe(true);
   });
   it('이미지 등록 — NULL·빈 문자열·공백은 N', () => {
     expect(matchesFacets(make({ image_filename: 'a.jpg' }), facets({ hasImage: 'y' }))).toBe(true);
