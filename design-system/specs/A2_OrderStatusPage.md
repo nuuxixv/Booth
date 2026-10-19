@@ -1,4 +1,6 @@
-# 사양 시트 — A2 고객 주문 상태 (OrderStatusPage)
+# 사양 시트 — A2 고객 주문 상태 (OrderStatusPage) — ⛔ 폐기
+
+> **⛔ 폐기 (2026-10-19) — C3_OrderStatusPage.md 참조.** 이 시트는 C3_OrderStatusPage.md와 동일 화면(`OrderStatusPage.jsx`)을 중복 기술한다(README "중복 의심" 표기). 단일 진실 소스는 **C3_OrderStatusPage.md**이며, 준비중(preparing) 배너 등 신규 갱신은 C3에만 반영한다. 아래 본문은 과거 기록으로만 보존한다.
 
 > 이 시트는 고객 주문 상태 화면의 정보·기능·데이터 구조의 단일 진실 소스다.
 > 시안과 실서비스 구현은 이 시트의 모든 항목을 1:1로 반영해야 한다.
