@@ -271,13 +271,16 @@ export const searchOrdersForLinking = async (term, excludeOrderId) => {
 
   const { data, error } = await query;
   if (error) throw error;
-  // 껍데기 부모는 연계 후보가 될 수 없음(실 주문만 자식이 된다)
-  return (data || []).filter(o => !o.is_group_parent);
+  // 껍데기 부모는 연계 후보가 될 수 없음(실 주문만 자식이 된다).
+  // preparing(현장 도움·준비중)은 아직 미완료 주문이라 합배송 후보에서 제외한다.
+  //   — 쿼리 단계에 cancelled/refunded 제외를 새로 넣으면 기존 동작이 바뀌므로(현재는
+  //     상태 필터가 없음) 여기선 preparing 만 클라이언트에서 뺀다(회귀 0, 상세는 보고 참조).
+  return (data || []).filter(o => !o.is_group_parent && o.status !== 'preparing');
 };
 
 /**
  * 같은 학회의 연계 가능한 주문 목록을 검색어 없이 가져옵니다. (합배송 만들기 기본 목록)
- * parent_order_id가 없고 취소/환불이 아닌 실 주문만 반환.
+ * parent_order_id가 없고 취소/환불/준비중이 아닌 실 주문만 반환.
  * @param {number} eventId - 기준 주문의 event_id
  * @param {number} [excludeOrderId] - 목록에서 제외할 기준 주문 id
  */
@@ -287,7 +290,9 @@ export const getLinkableOrdersByEvent = async (eventId, excludeOrderId) => {
     .select('id, customer_name, phone_number, total_cost, discount_amount, final_payment, delivery_fee, status, created_at, parent_order_id, is_group_parent, event_id, shipping_address')
     .eq('event_id', eventId)
     .is('parent_order_id', null)
-    .not('status', 'in', '("cancelled","refunded")')
+    // preparing(현장 도움·준비중)은 미완료라 합배송 후보에서 제외. 기존 cancelled/refunded
+    //   제외 목록에 덧붙인다(preparing 은 신규 상태라 기존 데이터에 없음 → 회귀 0).
+    .not('status', 'in', '("cancelled","refunded","preparing")')
     .order('created_at', { ascending: false })
     .limit(200);
 

@@ -92,12 +92,16 @@ export const isGroupMemberOrder = (order) =>
   Boolean(order?.is_group_parent) || order?.parent_order_id != null;
 
 /**
- * 일괄 선택(전체 선택) 대상 id — 합배송 그룹 소속을 뺀 단독 실 주문만.
+ * 일괄 선택(전체 선택) 대상 id — 합배송 그룹 소속·준비중을 뺀 단독 실 주문만.
+ * preparing(현장 도움·준비중)은 미완료 주문이라 일괄 상태 변경 대상에서 배제한다
+ * (결제대기 전환은 고객 제출·상품 저장으로 자동 발생 — 일괄 변경으로 건드리지 않음).
  * @param {Array} orders 현재 페이지 주문(플랫)
  * @returns {number[]}
  */
 export const selectableOrderIds = (orders = []) =>
-  orders.filter((o) => !isGroupMemberOrder(o)).map((o) => o.id);
+  orders
+    .filter((o) => !isGroupMemberOrder(o) && o.status !== 'preparing')
+    .map((o) => o.id);
 
 /**
  * 일괄 상태 변경 실행 직전, 선택 목록에서 합배송 그룹 소속을 걸러낸다 (최종 가드).
