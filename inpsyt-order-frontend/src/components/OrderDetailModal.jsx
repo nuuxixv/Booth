@@ -35,7 +35,7 @@ import LinkPreviewDialog from './LinkPreviewDialog';
 // 비연계 단일 주문 상세·편집 모달. 섹션 본문은 OrderSections 공유 컴포넌트로 위임.
 // (합배송 그룹은 GroupOrderModal이 담당 — 목록 클릭은 그룹이면 GroupOrderModal로 분기)
 
-const OrderDetailModal = ({ order, open, onClose, statusToKorean, productsMap, products, events, addNotification, onUpdate, productsLoading, hasPermission }) => {
+const OrderDetailModal = ({ order, open, onClose, statusToKorean, productsMap, products, events, addNotification, onUpdate, productsLoading, hasPermission, onLocalPromote }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
@@ -115,6 +115,7 @@ const OrderDetailModal = ({ order, open, onClose, statusToKorean, productsMap, p
           onUpdate={onUpdate}
           productsLoading={productsLoading}
           hasPermission={hasPermission}
+          onLocalPromote={onLocalPromote}
         />
 
         {/* 연계 주문 연결 — 비연계 단일 주문만 (미리보기 다이얼로그로 합배송 생성) */}

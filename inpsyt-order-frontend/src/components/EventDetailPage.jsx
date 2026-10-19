@@ -62,6 +62,7 @@ import EventQrDialog from './EventQrDialog';
 import EventAutofillFields from './EventAutofillFields';
 import EventRequiredFields from './EventRequiredFields';
 import EventOptionalFields from './EventOptionalFields';
+import EventCloseControl from './EventCloseControl';
 
 // Toast UI 에디터/뷰어 = 무거운 의존성 → 지연 로드(초기/공개 번들 0 영향)
 const PrepNoteEditor = lazy(() => import('./PrepNoteEditor'));
@@ -906,12 +907,15 @@ const EventDetailPage = () => {
                       {orderUrl}
                     </Typography>
                     <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                      <Button size="small" variant="outlined" startIcon={<OpenInNewIcon sx={{ fontSize: 16 }} />} onClick={handleOpenOrder} sx={{ minHeight: 36 }}>열기</Button>
-                      <Button size="small" variant="outlined" startIcon={<ContentCopyIcon sx={{ fontSize: 16 }} />} onClick={handleCopyOrderUrl} sx={{ minHeight: 36 }}>복사</Button>
-                      <Button size="small" variant="outlined" startIcon={<QrCode2Icon sx={{ fontSize: 16 }} />} onClick={handleOpenQr} sx={{ minHeight: 36 }}>QR</Button>
+                      <Button size="small" variant="outlined" startIcon={<OpenInNewIcon sx={{ fontSize: 16 }} />} onClick={handleOpenOrder} sx={{ minHeight: 36 }} disabled={!!event.closed_at}>열기</Button>
+                      <Button size="small" variant="outlined" startIcon={<ContentCopyIcon sx={{ fontSize: 16 }} />} onClick={handleCopyOrderUrl} sx={{ minHeight: 36 }} disabled={!!event.closed_at}>복사</Button>
+                      <Button size="small" variant="outlined" startIcon={<QrCode2Icon sx={{ fontSize: 16 }} />} onClick={handleOpenQr} sx={{ minHeight: 36 }} disabled={!!event.closed_at}>QR</Button>
                     </Box>
                   </Box>
                 </OverviewRow>
+
+                {/* 학회 종료 처리(현장 도움 PIN 주문) — 주문서 행 바로 아래 구분선 뒤(L2 §16). events:edit 전용, 자체 가드. */}
+                <EventCloseControl event={event} canEdit={canEdit} onChanged={loadEvent} addNotification={addNotification} />
               </Box>
             )}
           </SectionCard>

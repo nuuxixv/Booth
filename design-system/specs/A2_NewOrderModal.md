@@ -3,7 +3,8 @@
 > 이 시트는 어드민 신규 주문 등록 모달의 정보·기능·데이터 구조의 단일 진실 소스다.
 > 시안 부재 화면이므로 실 컴포넌트(`NewOrderModal.jsx`)가 사실상의 기획이다. 시안이 작성되면 이 시트에 모든 항목이 1:1로 반영되어야 한다.
 > 임의 단순화·통합·생략은 건우님의 명시적 승인 후 이 시트를 먼저 갱신한 다음에만 허용된다.
-> 마지막 갱신: 2026-10-19 **PIN 주문 분기 확장(사양·시안 단계)**(product-designer). "+신규 주문"에 **[PIN 주문]/[수기 주문] 분기**를 앞단에 추가. PIN 주문 생성 화면(학회 자동 선택·상품 0개 생성·PIN 4자리 크게 표시·복사) 신설. 수기 주문 = 현행 NewOrderModal **전면 보존**. 아래 "## PIN 주문 (현장 도움 주문) 확장" 참조. 시안 `PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`). 근거 `DOCS/PRD_현장도움주문.md` §4. (구현·DB는 별도 — 이번은 사양·시안만.)
+> 마지막 갱신: 2026-10-19 **PIN 주문 분기 — 실 페이지 구현 완료**(frontend-engineer). "+신규 주문" 버튼이 `NewOrderBranchDialog`(PIN/수기 2택)를 먼저 열고(바로 NewOrderModal 안 열림), PIN 선택 시 `PinOrderCreateDialog`(학회 자동 선택·상품 0개 생성 안내·`createHelperOrder` RPC·PIN 크게+복사→상세 자동 오픈), 수기 선택 시 **현행 NewOrderModal 그대로**(경로 1글자도 안 바꿈). 분기는 NewOrderModal 바깥. 시안 `PinOrderAdminPreview.jsx` 단계 ①②. (주의: 동시 작업 PR #80이 이 헤더·변경 이력을 함께 수정 — 머지 시 충돌 가능.)
+> 이전 갱신: 2026-10-19 **PIN 주문 분기 확장(사양·시안 단계)**(product-designer). "+신규 주문"에 **[PIN 주문]/[수기 주문] 분기**를 앞단에 추가. PIN 주문 생성 화면(학회 자동 선택·상품 0개 생성·PIN 4자리 크게 표시·복사) 신설. 수기 주문 = 현행 NewOrderModal **전면 보존**. 아래 "## PIN 주문 (현장 도움 주문) 확장" 참조. 시안 `PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`). 근거 `DOCS/PRD_현장도움주문.md` §4. (구현·DB는 별도 — 이번은 사양·시안만.)
 > 이전 갱신: 2026-08-18 **할인 단가 유틸 경유**(frontend-engineer). `calcDiscountedPrice`와 검색 리스트 할인 표시 판정(`isDisc`)을 공용 유틸 `utils/pricing.js`(`getDiscountedUnit`/`getEffectiveRate`)로 교체 — `discount_override` 반영(실효율 = `discount_override ?? (is_discountable ? discountRate : 0)`). override가 NULL/undefined면 순수 no-op. 검증: build·pricing.test 14 passed·lint 신규 0.
 > 이전 갱신: 2026-05-29 신설 (M3-13 선행 — 시안 부재 단일 진실 소스 박기).
 
@@ -283,7 +284,7 @@
 - 장바구니 수량 컨트롤은 ±/숫자/삭제 3컴포넌트 유지
 - 푸터 “주문 추가” 버튼은 cart 비어 있을 때 disabled (실수 방지)
 
-## PIN 주문 (현장 도움 주문) 확장 (2026-10-19, 사양·시안 단계)
+## PIN 주문 (현장 도움 주문) 확장 (2026-10-19, 실 페이지 구현 완료)
 
 > 근거: `DOCS/PRD_현장도움주문.md` §4(담당자 흐름)·§5·§6. 기존 NewOrderModal(수기 주문)은 그대로 보존하고, 그 **앞단에 분기**를 둔다. 분기는 이 모달 바깥이며, 이 모달의 내부 구조(위 표시 정보·액션·입력 폼)는 수기 주문 경로에서 1글자도 바꾸지 않는다.
 
@@ -295,7 +296,8 @@
 - [ ] 분기 UI = 큰 선택 카드 2개(아이콘 + 제목 + 설명). PIN 주문 카드 primary 강조. (장식·그라데이션·가짜 통계 없음 — 룰 E)
 
 ### PIN 주문 생성 화면
-- [ ] **학회 / 행사 Select — 진행 중인 학회 자동 선택.** 상태 뱃지(예정/진행중/종료) + 할인율 캡션 유지(기존 학회 Select 규칙과 동일). 다른 학회로 변경 가능.
+- [x] **학회 / 행사 Select — 진행 중인 학회 자동 선택 + 상태 뱃지(예정/진행중/종료) + 할인율 캡션.** (2026-10-19 보완 — 구현 완료) 자동 선택 = `pickDefaultPinEvent(events, getTodayKST())` 순수 함수(진행 중 → start_date 최신 → 오늘 이전 시작 최신 → 가장 임박한 예정, **종료 처리(closed_at) 학회 제외**; vitest 포함). 상태 뱃지 = `pinEventStatusKey`(closed_at→종료, 'YYYY-MM-DD' 문자열 KST 비교 — NewOrderModal `getEventStatusKey`/`utils/date getEventStatusKST`와 동치) → `StatusBadge`. **종료 처리(closed_at) 학회는 MenuItem disabled + 기본 선택 제외 + 생성 버튼 비활성.** 다른 학회로 변경 가능. 전제: `getEvents` select에 `end_date, closed_at` 추가(소비처 `OrderManagementPage`·`FulfillmentPage`, `sortEventsForDropdown`은 start_date만 써 영향 없음).
+  - **부수 효과(원 사양 의도):** `getEvents`에 `end_date`가 들어가면서 **수기 주문(NewOrderModal)의 학회 Select 상태 뱃지가 이제 실제로 표시**된다(이전엔 end_date 미조회로 `getEventStatusKey`가 null→뱃지 미노출). NewOrderModal 파일은 수정하지 않음.
 - [ ] **상품 0개로도 생성 가능.** "상품은 지금 담지 않아도 됨" 안내. 미리 담거나 고객 제출 뒤 담는다(§4-3).
 - [ ] 생성 동작(기획) = 주문 1건 `status='preparing'`(준비중) + `match_code`(PIN 4자리) 발급. 고객 정보 컬럼은 비운다(PRD §6 — 고객 제출 시 채움). 금액은 담긴 상품으로 계산(0개면 0원).
 - [ ] 생성 직후 **PIN 크게 표시 + 복사**("큰 숫자 + 복사"만). 안내 문구: "고객에게 번호를 불러 주세요 … 고객이 제출하면 번호는 사라집니다". PIN은 글자(text)로 저장해 앞자리 0 유지(예 `0427`).
@@ -308,6 +310,7 @@
 - [ ] 시안: `src/components/PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`) — 단계 ①(분기 선택), ②(PIN 주문 생성 + PIN 큰 표시·복사). 토글로 전환.
 
 ## 변경 이력
+- 2026-10-19 PIN 주문 분기 — 실 페이지 구현 완료(frontend-engineer) — `OrderManagementPage`의 "+신규 주문" 버튼이 `NewOrderBranchDialog`(신규)를 먼저 연다. PIN 주문 카드 → `PinOrderCreateDialog`(신규, 학회 Select 자동 선택·상품 0개 생성 안내·`createHelperOrder(eventId)` RPC(`api/helperOrderAdmin.js`)·생성 후 `PinDisplay` 큰 PIN+복사·"주문 상세 열기"로 이어짐). 수기 주문 카드 → 기존 `NewOrderModal`(`OPEN_NEW_ORDER`) 그대로 — 내부 무변경(회귀 0). 종료 학회는 RPC "종료된 학회입니다" 예외를 사용자 문구로 매핑. **보완(2026-10-19 2차, 메인 Claude 검수): 학회 기본값 결함 수정** — getEvents가 이름순 정렬이라 `state.events[0]`이 가나다 첫 학회로 잡히던 문제를, `getEvents`에 `end_date, closed_at` 추가 + 순수 함수 `pickDefaultPinEvent`(진행 중 KST 판정)로 교체. PIN 생성 다이얼로그에 상태 뱃지(`pinEventStatusKey`) 복원 + closed_at 학회 선택지 비활성. **부수 효과: NewOrderModal 상태 뱃지가 이제 표시(원 사양 의도).** PR #80이 이 헤더·변경 이력을 동시 수정하므로 머지 충돌 가능. 검증: lint 신규 0, vitest(pinOrder 20건) 통과, build OK.
 - 2026-10-19 PIN 주문 분기 확장(사양·시안 단계, product-designer) — "+신규 주문" 앞단에 [PIN 주문]/[수기 주문] 분기 신설. PIN 주문 생성 화면(학회 자동 선택·상품 0개 생성·PIN 4자리 크게+복사) 사양 추가. 수기 주문 = 현행 NewOrderModal 전면 보존(내부 무변경). 시안 `PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`) 단계 ①②. 근거 `DOCS/PRD_현장도움주문.md` §4. 실 구현·DB(`match_code`·인덱스·PIN 생성/조회 함수)는 별도 사이클.
 - 2026-05-29 신설 — M3-13 선행. 시안 부재 화면이므로 실 컴포넌트가 단일 진실 소스. 스냅샷 컬럼 미입력 1건, status_history 초기항목 누락 1건, 배송비 기준 3중 분기 1건, customer_request·admin_memo 입력란 부재 2건을 부채 후보로 기록. 시안 작업 착수 시 이 시트의 핵심 발견 6건을 먼저 정리한 뒤 진행.
 - 2026-05-29 M3-13 시안 정합 — 시안 부재이므로 사양 시트 단일 진실 소스 기반 토큰·합성 컴포넌트 적용.

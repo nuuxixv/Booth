@@ -39,15 +39,20 @@ import { useSearchParams } from 'react-router-dom';
 import OrderDetailModal from './OrderDetailModal';
 import GroupOrderModal from './GroupOrderModal';
 import NewOrderModal from './NewOrderModal';
+import NewOrderBranchDialog from './NewOrderBranchDialog';
+import PinOrderCreateDialog from './PinOrderCreateDialog';
+import { PinChip } from './PinOrderBits';
 import ShippingPickModal from './ShippingPickModal';
 import TableSkeleton from './TableSkeleton';
 import { SearchOff as SearchOffIcon, FilterList as FilterListIcon } from '@mui/icons-material';
 import { getEvents } from '../api/events';
 import { sortEventsForDropdown, groupEventsForDropdown, formatEventStartDate } from '../utils/eventSort';
 import { fetchAllProducts } from '../api/products';
-import { getOrders, groupLinkedOrders, reassignGroupRepresentative } from '../api/orders';
+import { getOrders, getOrderById, groupLinkedOrders, reassignGroupRepresentative } from '../api/orders';
 import { sendAlimtalk } from '../api/alimtalk';
 import { buildOrderTree, summarizeGroupStatus, formatGroupCustomerNames, classifyGroupStatusChange, selectableOrderIds, partitionBulkSelectable } from '../utils/groupOrder';
+import { isPreparingOrder } from '../utils/pinOrder';
+import { playBeep } from '../utils/playBeep';
 import { PageHeader, SectionCard, StatusBadge, EmptyState, DateField } from './ui';
 import { STATUS_TO_KOREAN, ALLOWED_TRANSITIONS } from '../constants/orderStatus';
 
@@ -208,6 +213,16 @@ const OrderManagementPage = () => {
   }));
   const [bulkStatus, setBulkStatus] = React.useState('');
   const [pick, setPick] = React.useState({ open: false, oldRep: null, candidates: [], newStatus: null, groupParentId: null });
+  // "+신규 주문" 분기 → PIN 주문 / 수기 주문
+  const [branchOpen, setBranchOpen] = React.useState(false);
+  const [pinCreateOpen, setPinCreateOpen] = React.useState(false);
+  // PIN 주문 생성 후 목록 갱신→해당 주문 상세 자동 오픈용(비동기 재조회 뒤 등장 시 연다)
+  const [pendingOpenOrderId, setPendingOpenOrderId] = React.useState(null);
+  // 원격 제출 실시간 알림 — 현재 목록의 준비중 주문 id 집합(UPDATE payload에 old.status 없음 → 집합으로 판정)
+  const preparingIdsRef = React.useRef(new Set());
+  // 같은 화면에서 본인이 저장해 전환한 주문 — 실시간 알림 중복 억제
+  const suppressPromoteIdsRef = React.useRef(new Set());
+  const audioCtxRef = React.useRef(null);
 
   const handleSelectAllClick = () => {
     // 합배송 그룹 소속(껍데기·자식 전부)은 전체 선택 대상에서 제외 — 위임 경로 우회 방지.
@@ -307,6 +322,53 @@ const OrderManagementPage = () => {
   useEffect(() => {
     dispatch({ type: 'SET_FILTER', payload: { key: 'currentPage', value: 1 } });
   }, [selectedProductCategory, productSearchTerm]);
+
+  // 현재 목록의 준비중 주문 id 집합을 최신화(실시간 UPDATE 판정의 기준).
+  useEffect(() => {
+    preparingIdsRef.current = new Set(state.orders.filter(isPreparingOrder).map((o) => o.id));
+  }, [state.orders]);
+
+  // 원격 제출 실시간 알림 — 준비중 주문이 결제대기(pending)로 바뀌면 "결제 준비 완료" 알림 + 목록 갱신.
+  // 한계: 주문 관리 화면에 있을 때만 동작(AdminLayout의 전역 알림은 INSERT 전용). 채널은 언마운트 시 정리.
+  useEffect(() => {
+    const channel = supabase
+      .channel('orders-pin-promote')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'orders' },
+        (payload) => {
+          const row = payload.new || {};
+          if (!preparingIdsRef.current.has(row.id)) return; // 직전 준비중이던 주문만
+          if (row.status !== 'pending') {
+            // 아직 준비중(고객이 배송지만 먼저 제출 등) — 목록만 갱신("작성 중"→고객명). 알림·알림음 없음.
+            fetchOrders();
+            return;
+          }
+          preparingIdsRef.current.delete(row.id);
+          if (suppressPromoteIdsRef.current.has(row.id)) {
+            // 같은 화면에서 본인이 저장해 전환 — 상세가 이미 알렸으므로 목록만 갱신(중복 알림 금지)
+            suppressPromoteIdsRef.current.delete(row.id);
+            fetchOrders();
+            return;
+          }
+          addNotification('결제 준비 완료 — 준비중 주문이 결제대기로 바뀌었습니다.', 'success');
+          playBeep(audioCtxRef);
+          fetchOrders();
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchOrders, addNotification]);
+
+  // PIN 주문 생성 직후 — 재조회로 등장한 준비중 주문 상세를 자동으로 연다.
+  useEffect(() => {
+    if (pendingOpenOrderId == null) return;
+    const found = state.orders.find((o) => o.id === pendingOpenOrderId);
+    if (found) {
+      dispatch({ type: 'OPEN_ORDER_DETAIL', payload: found });
+      setPendingOpenOrderId(null);
+    }
+  }, [state.orders, pendingOpenOrderId]);
 
   const handleBulkStatusUpdate = async () => {
     if (!bulkStatus || state.selectedOrders.length === 0) {
@@ -497,9 +559,9 @@ const OrderManagementPage = () => {
     return (
       <TableRow key={order.id} hover selected={isSelected} sx={{ cursor: 'pointer' }}>
         {hasPermission('orders:edit') && (
-          order.parent_order_id ? (
+          (order.parent_order_id || isPreparingOrder(order)) ? (
             <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
-              <Tooltip title="합배송 주문은 개별 행 또는 상세에서 변경하세요">
+              <Tooltip title={isPreparingOrder(order) ? '준비중 주문은 일괄 변경 대상이 아니에요' : '합배송 주문은 개별 행 또는 상세에서 변경하세요'}>
                 <span><Checkbox disabled /></span>
               </Tooltip>
             </TableCell>
@@ -510,12 +572,23 @@ const OrderManagementPage = () => {
           )
         )}
         <TableCell onClick={() => openOrder(order)}>{formatOrderId(order)}</TableCell>
-        <TableCell onClick={() => openOrder(order)}>{order.customer_name}</TableCell>
+        <TableCell onClick={() => openOrder(order)}>
+          {order.customer_name || (isPreparingOrder(order) ? <Box component="span" sx={{ color: 'text.disabled' }}>작성 중</Box> : order.customer_name)}
+        </TableCell>
         <TableCell onClick={() => openOrder(order)}>{state.events.find(e => e.id === order.event_id)?.name || 'N/A'}</TableCell>
         <TableCell onClick={() => openOrder(order)}>{(order.final_payment || 0).toLocaleString()}원</TableCell>
         <TableCell onClick={() => openOrder(order)}>{format(new Date(order.created_at), 'yyyy-MM-dd HH:mm')}</TableCell>
         <TableCell>
-          {(() => {
+          {isPreparingOrder(order) ? (
+            // 준비중: 뱃지 + PIN(match_code) + 취소(전이는 취소만, 결제대기는 자동 전환이라 드롭다운 대상 아님)
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
+              <StatusBadge value="preparing" size="sm" />
+              <PinChip pin={order.match_code} />
+              {hasPermission('orders:edit') && (
+                <Button size="small" variant="text" color="error" onClick={() => handleStatusChange(order.id, 'cancelled')} sx={{ minHeight: 32, px: 1 }}>취소</Button>
+              )}
+            </Box>
+          ) : (() => {
             const transitions = ALLOWED_TRANSITIONS[order.status] || [];
             return transitions.length === 0 ? (
               <StatusBadge value={order.status} size="sm" label={statusToKorean[order.status]} />
@@ -621,8 +694,8 @@ const OrderManagementPage = () => {
           <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
             <Box display="flex" alignItems="center" gap={1}>
               {hasPermission('orders:edit') && (
-                order.parent_order_id ? (
-                  <Tooltip title="합배송 주문은 개별 행 또는 상세에서 변경하세요">
+                (order.parent_order_id || isPreparingOrder(order)) ? (
+                  <Tooltip title={isPreparingOrder(order) ? '준비중 주문은 일괄 변경 대상이 아니에요' : '합배송 주문은 개별 행 또는 상세에서 변경하세요'}>
                     <span onClick={(e) => e.stopPropagation()}><Checkbox disabled sx={{ p: 0 }} /></span>
                   </Tooltip>
                 ) : (
@@ -631,14 +704,23 @@ const OrderManagementPage = () => {
               )}
               <Typography variant="body2" color="text.secondary">{format(new Date(order.created_at), 'yyyy-MM-dd')}</Typography>
             </Box>
-            <Box display="flex" alignItems="center" gap={0.75}>
+            <Box display="flex" alignItems="center" gap={0.75} flexWrap="wrap" justifyContent="flex-end">
               {order.alimtalk_status === 'failed' && <AlimtalkFailBadge />}
-              <StatusBadge value={order.status} size="sm" />
+              {isPreparingOrder(order) ? (
+                <>
+                  <StatusBadge value="preparing" size="sm" />
+                  <PinChip pin={order.match_code} />
+                </>
+              ) : (
+                <StatusBadge value={order.status} size="sm" />
+              )}
             </Box>
           </Box>
           <Box display="flex" justifyContent="space-between" alignItems="flex-end">
             <Box>
-              <Typography variant="subtitle1">{order.customer_name}</Typography>
+              <Typography variant="subtitle1">
+                {order.customer_name || (isPreparingOrder(order) ? <Box component="span" sx={{ color: 'text.disabled', fontWeight: 500 }}>작성 중</Box> : order.customer_name)}
+              </Typography>
               <Typography variant="body2" color="text.secondary">{state.events.find(e => e.id === order.event_id)?.name || 'N/A'}</Typography>
             </Box>
             <Typography variant="subtitle1" color="primary.main">{(order.final_payment || 0).toLocaleString()}원</Typography>
@@ -846,12 +928,25 @@ const OrderManagementPage = () => {
   const headerAction = (
     <Box sx={{ display: 'flex', gap: 1 }}>
       {hasPermission('orders:edit') && (
-        <Button variant="contained" color="primary" onClick={() => dispatch({ type: 'OPEN_NEW_ORDER' })}>
+        <Button variant="contained" color="primary" onClick={() => setBranchOpen(true)}>
           + 신규 주문
         </Button>
       )}
     </Box>
   );
+
+  // PIN 주문 생성 후 — 목록 재조회 + 상세 자동 오픈. 목록 필터로 새 주문이 안 보일 수 있어 단건 조회로 연다.
+  const handlePinCreated = async (orderId) => {
+    fetchOrders();
+    try {
+      const ord = await getOrderById(orderId);
+      if (ord) {
+        dispatch({ type: 'OPEN_ORDER_DETAIL', payload: ord });
+        return;
+      }
+    } catch { /* 단건 조회 실패 — 목록 등장 시 열기로 폴백 */ }
+    setPendingOpenOrderId(orderId);
+  };
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -1028,9 +1123,27 @@ const OrderManagementPage = () => {
             onUpdate={fetchOrders}
             productsLoading={state.productsLoading}
             hasPermission={hasPermission}
+            onLocalPromote={(id) => suppressPromoteIdsRef.current.add(id)}
           />
         )
       )}
+
+      {/* "+신규 주문" 분기 — PIN 주문 / 수기 주문 */}
+      <NewOrderBranchDialog
+        open={branchOpen}
+        onClose={() => setBranchOpen(false)}
+        onPickPin={() => { setBranchOpen(false); setPinCreateOpen(true); }}
+        onPickManual={() => { setBranchOpen(false); dispatch({ type: 'OPEN_NEW_ORDER' }); }}
+      />
+
+      {/* PIN 주문 생성 — 학회 자동 선택·상품 0개 생성·PIN 크게·복사 → 상세로 이어짐 */}
+      <PinOrderCreateDialog
+        open={pinCreateOpen}
+        onClose={() => setPinCreateOpen(false)}
+        events={state.events}
+        onCreated={handlePinCreated}
+        addNotification={addNotification}
+      />
 
       <NewOrderModal
         open={state.openNewOrderModal}

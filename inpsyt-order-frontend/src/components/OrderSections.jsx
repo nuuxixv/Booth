@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -31,14 +31,19 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import CloseIcon from '@mui/icons-material/Close';
 import EditIcon from '@mui/icons-material/Edit';
+import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
+import CreditCardIcon from '@mui/icons-material/CreditCard';
 import DaumPostcode from 'react-daum-postcode';
 import { supabase } from '../supabaseClient';
 import { sendAlimtalk } from '../api/alimtalk';
 import { SHIPPING_DEFAULTS, calcShippingFee } from '../constants/shipping';
-import { SectionCard, StatusBadge, InfoRow, PriceBlock } from './ui';
+import { SectionCard, StatusBadge, InfoRow, PriceBlock, EmptyState } from './ui';
 import ProductPickerDialog from './ProductPickerDialog';
+import { PinChip, ReadinessRow } from './PinOrderBits';
 import { formatPhone } from '../utils/formatPhone';
 import { getDiscountedUnit } from '../utils/pricing';
+import { shouldPromoteToPending } from '../utils/pinOrder';
+import { playBeep } from '../utils/playBeep';
 
 // 사양 시트: design-system/specs/A2_OrderDetailModal.md
 // OrderDetailModal(단일 주문)과 GroupOrderModal(껍데기 자식 토글)이 공유하는 섹션 본문.
@@ -56,14 +61,19 @@ const OrderSections = ({
   productsLoading,
   hasPermission,
   onStatusChangeIntercept,
+  onLocalPromote,
 }) => {
   const theme = useTheme();
+  const audioCtxRef = useRef(null);
 
   // order 로컬 미러 — 섹션 저장 후 onUpdate(부모 재조회)를 기다리지 않고 즉시 갱신.
   const [order, setOrder] = useState(orderProp);
 
   // editingSection: null | 'customer' | 'shipping' | 'memo' | 'items'
   const [editingSection, setEditingSection] = useState(null);
+  // 실시간 핸들러가 "현재 편집 중 섹션"을 읽기 위한 ref(재구독 없이 최신값 참조).
+  const editingSectionRef = useRef(editingSection);
+  useEffect(() => { editingSectionRef.current = editingSection; }, [editingSection]);
   const [sectionSaving, setSectionSaving] = useState(false);
   const [currentStatus, setCurrentStatus] = useState('');
   const [editedCustomerName, setEditedCustomerName] = useState('');
@@ -134,6 +144,49 @@ const OrderSections = ({
       setFinalTotal(orderProp.final_payment || 0);
     }
   }, [orderProp]);
+
+  // 준비중 주문을 상세로 보여 주는 동안 그 주문 id의 UPDATE 구독 — 고객이 (상세 창 밖에서) 원격 제출하면
+  // 고객 필드·상태·PIN을 즉시 반영해 "준비 상태" 줄과 주문자/배송지 표시가 바로 갱신된다.
+  // 편집 중인 상품 버퍼(editedOrderItems)·편집 중 섹션 입력값은 덮어쓰지 않는다. 채널명은 주문 id로 고유.
+  useEffect(() => {
+    if (!orderProp?.id || orderProp.status !== 'preparing') return undefined;
+    const channel = supabase
+      .channel(`order-detail-${orderProp.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${orderProp.id}` },
+        (payload) => {
+          const row = payload.new || {};
+          setOrder(prev => ({
+            ...prev,
+            status: 'status' in row ? row.status : prev.status,
+            match_code: 'match_code' in row ? row.match_code : prev.match_code,
+            customer_name: 'customer_name' in row ? row.customer_name : prev.customer_name,
+            phone_number: 'phone_number' in row ? row.phone_number : prev.phone_number,
+            inpsyt_id: 'inpsyt_id' in row ? row.inpsyt_id : prev.inpsyt_id,
+            shipping_address: 'shipping_address' in row ? row.shipping_address : prev.shipping_address,
+            customer_request: 'customer_request' in row ? row.customer_request : prev.customer_request,
+          }));
+          if ('status' in row && row.status) setCurrentStatus(row.status);
+          // 편집 중이 아닌 섹션만 입력 버퍼 동기화(편집 중 입력값 보호).
+          if (editingSectionRef.current !== 'customer') {
+            if ('customer_name' in row) setEditedCustomerName(row.customer_name || '');
+            if ('phone_number' in row) setEditedPhoneNumber(row.phone_number || '');
+            if ('inpsyt_id' in row) setEditedInpsytId(row.inpsyt_id || '');
+          }
+          if (editingSectionRef.current !== 'shipping') {
+            if ('shipping_address' in row) {
+              setEditedShippingAddress(row.shipping_address?.address || '');
+              setEditedShippingPostcode(row.shipping_address?.postcode || '');
+              setEditedShippingDetail(row.shipping_address?.detail || '');
+            }
+            if ('customer_request' in row) setEditedCustomerRequest(row.customer_request || '');
+          }
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [orderProp?.id, orderProp?.status]);
 
   // 상품 편집 중에만 총액 재계산
   useEffect(() => {
@@ -249,16 +302,31 @@ const OrderSections = ({
     setEditingSection(null);
   };
 
+  // 결제대기 자동 승격 알림 — "결제 준비 완료" 토스트 + 알림음 + 상위(목록) 중복 알림 억제.
+  const handlePreparingPromoted = () => {
+    setCurrentStatus('pending');
+    addNotification('결제 준비 완료 — 고객과 함께 확인한 뒤 카드로 결제하세요.', 'success');
+    playBeep(audioCtxRef);
+    onLocalPromote?.(order.id);
+  };
+
   const handleSaveCustomer = async () => {
     setSectionSaving(true);
     try {
+      // 담당자가 준비중 주문의 고객 정보를 직접 입력하는 경우에도 승격되어야 한다(상품이 이미 있을 때).
+      const itemCount = (order.mergedItems || order.order_items || []).filter(it => it.product_id).length;
+      const promote = shouldPromoteToPending({ status: order.status, itemCount, customerName: editedCustomerName });
+      const patch = { customer_name: editedCustomerName, phone_number: editedPhoneNumber, inpsyt_id: editedInpsytId };
+      // 승격 시 PIN 반납(match_code=null) — 사양 "결제대기 전환 시 PIN 미표시".
+      if (promote) { patch.status = 'pending'; patch.match_code = null; }
       const { error } = await supabase
         .from('orders')
-        .update({ customer_name: editedCustomerName, phone_number: editedPhoneNumber, inpsyt_id: editedInpsytId })
+        .update(patch)
         .eq('id', order.id);
       if (error) throw error;
-      setOrder(prev => ({ ...prev, customer_name: editedCustomerName, phone_number: editedPhoneNumber, inpsyt_id: editedInpsytId }));
+      setOrder(prev => ({ ...prev, customer_name: editedCustomerName, phone_number: editedPhoneNumber, inpsyt_id: editedInpsytId, ...(promote ? { status: 'pending', match_code: null } : {}) }));
       addNotification('주문자 정보가 저장되었습니다.', 'success');
+      if (promote) handlePreparingPromoted();
       setEditingSection(null);
       onUpdate();
     } catch (error) {
@@ -337,11 +405,32 @@ const OrderSections = ({
       if (delError) throw delError;
       const { error: insError } = await supabase.from('order_items').insert(itemsPayload);
       if (insError) throw insError;
+
+      // 금액 4필드 UPDATE.
       const { error: ordError } = await supabase
         .from('orders')
         .update({ total_cost: subtotal, discount_amount: totalDiscount, delivery_fee: shippingFee, final_payment: finalTotal })
         .eq('id', order.id);
       if (ordError) throw ordError;
+
+      // 준비중(PIN) 주문: 상품 1개+ 이고 (DB에) 고객 정보가 있으면 결제대기로 승격.
+      // 로컬 order.customer_name 이 stale일 수 있어(고객이 상세 창 밖에서 먼저 제출) DB 기준으로 판정 —
+      // .eq('status','preparing')·고객명 존재 조건을 건 UPDATE가 행을 돌려주면 전환된 것.
+      // status_history 는 트리거(trg_status_history)가 채우므로 프론트에서 쓰지 않는다. PIN은 반납(match_code=null).
+      let promoted = false;
+      let promotedCustomer = null;
+      if (order.status === 'preparing' && itemsPayload.filter(it => it.product_id).length >= 1) {
+        const { data: promoteRows, error: promoteErr } = await supabase
+          .from('orders')
+          .update({ status: 'pending', match_code: null })
+          .eq('id', order.id)
+          .eq('status', 'preparing')
+          .not('customer_name', 'is', null)
+          .neq('customer_name', '')
+          .select('id, status, customer_name, phone_number, inpsyt_id, shipping_address, customer_request');
+        if (promoteErr) throw promoteErr;
+        if (promoteRows && promoteRows.length > 0) { promoted = true; promotedCustomer = promoteRows[0]; }
+      }
 
       const localItems = itemsPayload.map(it => ({ ...it, order_id: order.id }));
       setOrder(prev => ({
@@ -352,8 +441,18 @@ const OrderSections = ({
         discount_amount: totalDiscount,
         delivery_fee: shippingFee,
         final_payment: finalTotal,
+        ...(promoted ? {
+          status: 'pending',
+          match_code: null,
+          customer_name: promotedCustomer.customer_name,
+          phone_number: promotedCustomer.phone_number,
+          inpsyt_id: promotedCustomer.inpsyt_id,
+          shipping_address: promotedCustomer.shipping_address,
+          customer_request: promotedCustomer.customer_request,
+        } : {}),
       }));
       addNotification('주문 상품이 저장되었습니다.', 'success');
+      if (promoted) handlePreparingPromoted();
       setEditingSection(null);
       onUpdate();
     } catch (error) {
@@ -491,6 +590,13 @@ const OrderSections = ({
 
   const canEdit = hasPermission('orders:edit');
 
+  // 준비중(현장 도움 PIN) 주문 — 상태 행 PIN 재표시·준비 상태 줄·주문자/배송지 빈 상태.
+  const isPreparing = currentStatus === 'preparing';
+  const savedItemCount = (order.mergedItems || order.order_items || []).filter(it => it.product_id).length;
+  const hasCustomerInfo = Boolean((order.customer_name || '').trim());
+  // PIN 주문에서 온 주문(상태 이력에 preparing)만 결제대기 단계에서 "함께 확인 + 카드 결제" 안내를 띄운다.
+  const cameFromPin = Array.isArray(order.status_history) && order.status_history.some(h => h.status === 'preparing');
+
   const renderEditableField = (value, onChange, placeholder, extra) => (
     <TextField value={value} onChange={onChange} size="small" fullWidth disabled={!canEdit} placeholder={placeholder} {...extra} />
   );
@@ -544,13 +650,24 @@ const OrderSections = ({
           <InfoRow
             label="상태"
             labelWidth={96}
-            value={(
+            multiline={isPreparing}
+            value={isPreparing ? (
+              // 준비중: 뱃지 + PIN(match_code) 재표시. 전이는 취소만(결제대기 전환은 자동이라 드롭다운 대상 아님).
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                <StatusBadge value="preparing" size="sm" />
+                <PinChip pin={order.match_code} />
+                {canEdit && (
+                  <Button size="small" variant="text" color="error" onClick={() => handleStatusSelect('cancelled')} sx={{ minHeight: 32, px: 1 }}>
+                    취소
+                  </Button>
+                )}
+              </Box>
+            ) : (
               <FormControl size="small" fullWidth>
                 <Select value={currentStatus} onChange={(e) => handleStatusSelect(e.target.value)} disabled={!canEdit}>
-                  {/* preparing(준비중)은 PIN 주문에서만 생기는 상태라 수동 선택지에서 뺀다.
-                      현재 상태가 준비중일 때만 표시용으로 남긴다(Select가 현재 값을 그려야 함). */}
+                  {/* preparing(준비중)은 PIN 주문에서만 생기는 상태라 수동 선택지에서 뺀다. */}
                   {statusToKorean && Object.entries(statusToKorean)
-                    .filter(([key]) => key !== 'preparing' || currentStatus === 'preparing')
+                    .filter(([key]) => key !== 'preparing')
                     .map(([key, value]) => (
                       <MenuItem key={key} value={key}>{value}</MenuItem>
                     ))}
@@ -631,6 +748,13 @@ const OrderSections = ({
         <StatusHistoryAccordion history={order.status_history} statusToKorean={statusToKorean} />
       )}
 
+      {/* 준비 상태 — 준비중(PIN)일 때만. "상품 n종 / 고객 정보 ○✕" */}
+      {isPreparing && (
+        <SectionCard title="준비 상태" padding={20}>
+          <ReadinessRow itemCount={savedItemCount} hasCustomer={hasCustomerInfo} />
+        </SectionCard>
+      )}
+
       {/* 주문자 정보 */}
       <SectionCard
         title="주문자 정보"
@@ -638,6 +762,14 @@ const OrderSections = ({
         action={renderSectionAction('customer', handleSaveCustomer)}
         sx={editingSection === 'customer' ? editingCardSx : undefined}
       >
+        {isPreparing && !hasCustomerInfo && editingSection !== 'customer' ? (
+          <EmptyState
+            icon={PersonOutlineIcon}
+            title="고객이 아직 제출하지 않았어요"
+            description="고객이 PIN으로 배송지(성함·연락처·주소)를 입력·제출하면 표시됩니다. 담당자가 직접 입력할 수도 있어요."
+            sx={{ py: 3 }}
+          />
+        ) : (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
           <InfoRow
             label="주문자명"
@@ -663,6 +795,7 @@ const OrderSections = ({
             muted={editingSection !== 'customer' && !order.inpsyt_id}
           />
         </Box>
+        )}
       </SectionCard>
 
       {/* 배송지 정보 — 3필드 분리 유지 */}
@@ -672,6 +805,9 @@ const OrderSections = ({
         action={renderSectionAction('shipping', handleSaveShipping)}
         sx={editingSection === 'shipping' ? editingCardSx : undefined}
       >
+        {isPreparing && !order.shipping_address?.address && editingSection !== 'shipping' ? (
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>고객 제출 전에는 배송지가 비어 있습니다.</Typography>
+        ) : (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
           <InfoRow
             label="우편번호"
@@ -713,6 +849,7 @@ const OrderSections = ({
             muted={editingSection !== 'shipping' && !order.customer_request}
           />
         </Box>
+        )}
       </SectionCard>
 
       {/* 관리자 메모 */}
@@ -886,6 +1023,29 @@ const OrderSections = ({
           totalColor={theme.palette.primary.main}
         />
       </SectionCard>
+
+      {/* 준비중 안내 — 고객 제출 대기(시안 ④ preparing). 상품·고객정보 둘 다 차면 자동 결제대기. */}
+      {isPreparing && (
+        <Box sx={{ p: 2, borderRadius: `${theme.radii.md}px`, bgcolor: theme.gray[50], border: `1px solid ${theme.gray[200]}` }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.6 }}>
+            고객이 제출해 <b>고객 정보 ○</b>가 되면 자동으로 결제대기로 바뀝니다. 그때 태블릿 화면을 고객에게 보여 주며 함께 확인한 뒤 결제하세요.
+          </Typography>
+        </Box>
+      )}
+
+      {/* 결제 준비 완료 — PIN 주문이 결제대기로 전환된 뒤 함께 확인 + 카드 결제(기존 paid 경로 재사용) */}
+      {cameFromPin && currentStatus === 'pending' && (
+        <Box sx={{ p: 2, borderRadius: `${theme.radii.md}px`, bgcolor: alpha(theme.accent.revenue, 0.06), border: `1px solid ${alpha(theme.accent.revenue, 0.25)}` }}>
+          <Typography variant="body2" sx={{ color: 'text.primary', lineHeight: 1.6, mb: canEdit ? 1.5 : 0 }}>
+            <b>결제 준비 완료.</b> 태블릿 화면의 상품·금액을 고객과 함께 확인한 뒤 카드로 결제하세요.
+          </Typography>
+          {canEdit && (
+            <Button variant="contained" startIcon={<CreditCardIcon sx={{ fontSize: 18 }} />} onClick={() => handleStatusSelect('paid')}>
+              카드 결제 진행
+            </Button>
+          )}
+        </Box>
+      )}
 
       {/* 상품 추가 피커 — 고객 프론트 상품 선택 UX 재사용 */}
       <ProductPickerDialog
