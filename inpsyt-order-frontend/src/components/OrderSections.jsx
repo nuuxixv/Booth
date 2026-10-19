@@ -32,7 +32,6 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import CloseIcon from '@mui/icons-material/Close';
 import EditIcon from '@mui/icons-material/Edit';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
-import CreditCardIcon from '@mui/icons-material/CreditCard';
 import DaumPostcode from 'react-daum-postcode';
 import { supabase } from '../supabaseClient';
 import { sendAlimtalk } from '../api/alimtalk';
@@ -1033,17 +1032,12 @@ const OrderSections = ({
         </Box>
       )}
 
-      {/* 결제 준비 완료 — PIN 주문이 결제대기로 전환된 뒤 함께 확인 + 카드 결제(기존 paid 경로 재사용) */}
+      {/* 결제 준비 완료 — PIN 주문이 결제대기로 전환된 뒤 함께 확인 안내. 결제는 위 상태 Select(결제대기→결제완료)로 처리(건우님 2026-10-19). */}
       {cameFromPin && currentStatus === 'pending' && (
         <Box sx={{ p: 2, borderRadius: `${theme.radii.md}px`, bgcolor: alpha(theme.accent.revenue, 0.06), border: `1px solid ${alpha(theme.accent.revenue, 0.25)}` }}>
-          <Typography variant="body2" sx={{ color: 'text.primary', lineHeight: 1.6, mb: canEdit ? 1.5 : 0 }}>
-            <b>결제 준비 완료.</b> 태블릿 화면의 상품·금액을 고객과 함께 확인한 뒤 카드로 결제하세요.
+          <Typography variant="body2" sx={{ color: 'text.primary', lineHeight: 1.6 }}>
+            <b>결제 준비 완료.</b> 태블릿 화면의 상품·금액을 고객과 함께 확인한 뒤 결제하고, 위 상태를 결제완료로 바꿔 주세요.
           </Typography>
-          {canEdit && (
-            <Button variant="contained" startIcon={<CreditCardIcon sx={{ fontSize: 18 }} />} onClick={() => handleStatusSelect('paid')}>
-              카드 결제 진행
-            </Button>
-          )}
         </Box>
       )}
 
