@@ -3,7 +3,8 @@
 > 이 시트는 어드민 주문 상세·편집 모달의 정보·기능·데이터 구조의 단일 진실 소스다.
 > 시안 부재 화면이므로 실 컴포넌트(`OrderDetailModal.jsx`)가 사실상의 기획이다. 시안이 작성되면 이 시트에 모든 항목이 1:1로 반영되어야 한다.
 > 임의 단순화·통합·생략은 건우님의 명시적 승인 후 이 시트를 먼저 갱신한 다음에만 허용된다.
-> 마지막 갱신: 2026-10-12 **stale 테스트 2건 정합화 + 편집 진입 서술 정리**. `OrderDetailModal.test.jsx`의 실패 2건(전역 `/편집/i` 버튼 단일 조회 → 섹션별 Edit 아이콘 4개 다중매칭, `update_order_details` RPC 기대)은 78e440f(2026-07-07 섹션별 인라인 편집 재설계, CTO·CPO 검수 통과)부터 이어진 **테스트 쪽 불일치**로 판정(코드 회귀 아님 — 코드 무수정). 테스트를 섹션 제목 기준 편집 버튼 조회 + `orders` 부분 UPDATE 기대로 교체, 회귀 테스트 상품 목에 `is_discountable:true` 보강(412ba7b 할인 공식 정합). 두 테스트 모두 변이 검증(배송비 할인가 기준 회귀·주문자명 UPDATE 누락을 주입하면 실패) 확인. 시트 본문에 남아 있던 전역 "편집/저장 토글"·헤더 아이콘·`handleSaveAll` 서술을 현행으로 정리. 검증: 전체 vitest 329 pass·0 fail·2 skip, lint 0.
+> 마지막 갱신: 2026-10-19 **준비중(PIN 주문) 상세 확장(사양·시안 단계)**(product-designer). 준비중 상태의 상세에 PIN 재표시 · "상품 n종 / 고객 정보 ○✕" 준비 상태 줄 · 상품 담기(`ProductPickerDialog` 재사용) · 결제대기 자동 전환 · "결제 준비 완료" 알림(토스트·알림음) · 함께 확인 안내를 추가. 아래 "## 준비중(PIN 주문) 상세 확장" 참조. 시안 `PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`) 단계 ③④. 근거 `DOCS/PRD_현장도움주문.md` §4·§5. (구현·DB는 별도.)
+> 이전 갱신: 2026-10-12 **stale 테스트 2건 정합화 + 편집 진입 서술 정리**. `OrderDetailModal.test.jsx`의 실패 2건(전역 `/편집/i` 버튼 단일 조회 → 섹션별 Edit 아이콘 4개 다중매칭, `update_order_details` RPC 기대)은 78e440f(2026-07-07 섹션별 인라인 편집 재설계, CTO·CPO 검수 통과)부터 이어진 **테스트 쪽 불일치**로 판정(코드 회귀 아님 — 코드 무수정). 테스트를 섹션 제목 기준 편집 버튼 조회 + `orders` 부분 UPDATE 기대로 교체, 회귀 테스트 상품 목에 `is_discountable:true` 보강(412ba7b 할인 공식 정합). 두 테스트 모두 변이 검증(배송비 할인가 기준 회귀·주문자명 UPDATE 누락을 주입하면 실패) 확인. 시트 본문에 남아 있던 전역 "편집/저장 토글"·헤더 아이콘·`handleSaveAll` 서술을 현행으로 정리. 검증: 전체 vitest 329 pass·0 fail·2 skip, lint 0.
 > 이전 갱신: 2026-08-25 **상품 추가 = 고객 프론트 상품 선택 UX 재사용**(frontend-engineer, tech-cto 위임). 편집 모드 "상품 추가" 버튼이 **첫 상품 자동 삽입**을 폐기하고 신규 `ProductPickerDialog`(고객 `ProductSelectionStep` 재사용: 검사군 트리·검색·인기/신규 필터)를 연다. 담기 임시 카트 확정 시 각 항목을 `editedOrderItems`에 `{product_id, quantity}`로 append(이미 있는 상품이면 **수량 합산**, 중복 행 금지). 가격·스냅샷은 기존 파이프라인(useEffect 재계산 + handleSaveItems payload)이 그대로 처리 — 신설 없음. 어드민 자유도 원칙상 `visibleCategories=null`(전 상품 노출). 태그 우선 정렬은 행사 `tags ∪ host_society`(getEvents가 host_society 미포함이라 admin에선 tags만, graceful). 기존 행별 Autocomplete는 담긴 행 교체·수정용으로 유지. `ProductSelectionStep` 내부 무수정. 검증: build·lint 신규 0, 전체 테스트 294 pass·2 fail(기존 편집버튼 다중매칭, 증가 0).
 > 이전 갱신: 2026-08-18 **상품 표 행별 할인 가시화**(frontend-engineer, 프리뷰 QA 수정). 할인가 셀에 **할인율 % 보조표기**(정가 대비 역산 `round((1−할인가/정가)×100)` — 스냅샷 주문은 당시 실제율, 0%인 행은 `-`), 합계 셀에 **행별 할인액 보조표기**(`−(정가−할인가)×수량`) 추가. 신규 열이 아닌 셀 보조표기(모달 폭 제약). 계산은 `getDiscountedUnit`/스냅샷 우선 규칙 유지, %는 표시된 정가·할인가에서 역산(표시 정합 보장). 목적: 어떤 상품이 몇 % 할인됐는지 육안 구분 + **고객(정가·%·할인가) < 어드민(정가·%·할인가·할인액)** 정보량 원칙. 검증: build·lint 신규 0·pricing.test 14. (OrderDetailModal.test 편집버튼 다중매칭 실패 2건은 기존 실패로 무관 — HEAD 베이스라인 동일 확인.)
 > 이전 갱신: 2026-08-18 **편집 상품 금액 계산 정정 + 스냅샷 우선**(frontend-engineer, tech-cto 위임). 상품 편집 소계 재계산(useEffect)·저장 payload(order_items 직접 write)·표 표시 3곳(OrderSections)의 할인가를 공용 유틸 `getDiscountedUnit(product, discountRate)`로 교체. 기존 `originalPrice*(1-discountRate)`는 **`Math.round` 누락·`is_discountable` 미반영·`discount_override` 미반영**이었음(동시 해소). **저장 payload는 서버(create-order)를 우회하는 직접 DB write라 이 공식이 정본.** 배송비 판정은 정가(할인 전) 총액 기준 유지(회귀 가드 보존). **표 표시(비편집=기존 아이템)는 스냅샷 우선** — `item.price_at_purchase`가 있으면 그걸 표시, 없을 때만 유틸 폴백. **동작 변경**: 과거 비할인(is_discountable=false) 상품에도 행사 할인이 잘못 적용되던 표시·저장이 바로잡힘(운영 DB 불일치 0건 확인 — 깨질 기존 동작 없음). **근인 = `OrderManagementPage:237` productsMap 화이트리스트**에 `is_discountable`이 없어 OrderSections가 못 보던 것 → map에 `is_discountable`·`discount_override` 추가. 검증: build·lint 신규 0·pricing.test 14. (참고: `OrderDetailModal.test`의 편집 버튼 다중매칭 실패 2건은 SectionCard 다(多)편집 리팩터 이후 잔존한 기존 실패로 본 작업과 무관 — mockProducts에 `is_discountable:true` 추가해 렌더 테스트만 정합화.)
@@ -307,7 +308,33 @@
 - 알림톡 재발송 버튼은 “알림톡” InfoRow 우측 인라인 노출(2026-07-07 헤더에서 이동), 자동 발송과 수동 발송의 분리 의도 유지
 - 모바일은 SwipeableDrawer(bottom, 95vh), 데스크톱은 가운데 정렬 카드(maxWidth 800)
 
+## 준비중(PIN 주문) 상세 확장 (2026-10-19, 사양·시안 단계)
+
+> 근거: `DOCS/PRD_현장도움주문.md` §4(담당자 흐름 4·5·6)·§5. PIN 주문으로 생성된 주문은 `status='preparing'`(준비중)으로 이 모달에 들어온다. **기존 섹션 구조(주문 상세 정보 / 주문자 정보 / 배송지 정보 / 관리자 메모 / 주문 상품 목록 / 결제 정보)는 그대로** 쓰고, 준비중일 때의 표시·동작만 아래를 더한다. 상태 상수 `preparing`/라벨 `준비중`/색 `#64748B`는 `A1_OrderManagementPage.md`의 상태 상수 확장과 공유(단일 소스).
+
+### 준비중 — 주문 상세 정보 섹션
+- [ ] **상태 행에 준비중 뱃지 + PIN 재표시.** "상태" InfoRow(또는 그 옆)에 준비중 `StatusBadge`와 함께 `match_code`(PIN 4자리)를 칩으로 노출. **고객이 제출하면 PIN은 반납되어 사라진다**(결제대기 전환 시 미표시).
+- [ ] **"상품 n종 / 고객 정보 ○✕" 준비 상태 줄.** 상품 담긴 종 수와 고객 정보 유무를 두 개의 상태 칩(○=채움·accent.revenue soft / ✕=비움·중립)으로 보여 준다. 캡션: "상품(1개 이상)과 고객 정보가 모두 채워지면 자동으로 결제대기로 바뀌고 '결제 준비 완료' 알림이 울려요".
+- [ ] 준비중은 상태 Select의 전이가 `['cancelled']`뿐(결제대기 전환은 자동이라 드롭다운 대상 아님 — A1 상태 전이 참조). 취소는 목록·상세에서 가능.
+
+### 준비중 — 주문자/배송지 섹션
+- [ ] 고객 제출 전에는 **주문자 정보·배송지 정보가 비어 있음.** 주문자 섹션은 빈 상태("고객이 아직 제출하지 않았어요 — PIN으로 배송지를 입력·제출하면 표시됩니다"), 배송지 섹션은 "고객 제출 전에는 배송지가 비어 있습니다".
+- [ ] 고객 제출 후(결제대기): 주문자명·연락처·인싸이트 ID, 배송지 **3필드 분리(우편번호·주소·상세 주소) + 배송 메모** 그대로 표시(통합 금지 — 기존 §배송지 정보 규칙 유지).
+
+### 준비중 — 주문 상품 목록(상품 담기)
+- [ ] **"상품 담기" = 기존 `ProductPickerDialog`(고객 상품 선택 UX 재사용) 그대로 사용.** 담김 상품은 행사 할인율·배송비 자동 계산(기존 파이프라인). 미리 담아도, 고객 제출 뒤 담아도 됨.
+- [ ] 고객은 상품을 수정하지 않는다(상품 칸=담당자, 배송지 칸=고객). 서로 덮어쓰지 않음(PRD §2).
+
+### 결제대기 자동 전환 + 알림
+- [ ] **상품(1개 이상) + 고객 정보가 둘 다 채워지는 순간 자동으로 `preparing → pending`(결제대기).** 별도 "확정" 버튼 없음(PRD §7). 담당자가 상품을 저장하는 순간에도 전환(고객이 상품 없이 먼저 제출한 경우).
+- [ ] 전환 순간 **"결제 준비 완료" 알림(토스트 + 알림음).** 토스트는 "고객과 함께 확인한 뒤 카드로 결제하세요"를 동반. (알림음 = 어드민 실시간 연결의 준비중→결제대기 변경 감지, PRD §6.)
+- [ ] 결제대기 전환 후 하단에 **함께 확인 안내 + 카드 결제 버튼**(기존 결제 처리). "태블릿 화면의 상품·금액을 고객과 함께 확인한 뒤 결제".
+
+### 시안 반영
+- [ ] 시안: `src/components/PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`) — 단계 ③(준비중 상세: PIN·준비 상태 줄·상품 담기), ④(고객 제출 → 결제대기 전환 + "결제 준비 완료" 토스트·알림음 + 함께 확인·카드 결제).
+
 ## 변경 이력
+- 2026-10-19 준비중(PIN 주문) 상세 확장(사양·시안 단계, product-designer) — 준비중 상태 상세에 PIN 재표시(제출 시 소멸)·"상품 n종 / 고객 정보 ○✕" 준비 상태 줄·상품 담기(ProductPickerDialog 재사용)·결제대기 자동 전환·"결제 준비 완료" 토스트/알림음·함께 확인·카드 결제 안내 추가. 기존 6섹션·배송지 3필드 분리 보존. 상태 상수는 A1과 공유(preparing/준비중/#64748B, ALLOWED_TRANSITIONS.preparing=['cancelled']). 시안 `PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`) 단계 ③④. 근거 `DOCS/PRD_현장도움주문.md` §4·§5.
 - 2026-05-29 신설 — M3-13 선행. 시안 부재 화면이므로 실 컴포넌트가 단일 진실 소스. RPC 시그니처 불일치 1건, 삭제 트랜잭션 부재 1건, linkOrders 배송비 정책 모호 1건, 알림톡 이력 UI 미노출 1건을 부채 후보로 기록. 시안 작업 착수 시 이 시트의 핵심 발견 5건을 먼저 정리한 뒤 진행.
 - 2026-05-29 M3-13 시안 정합 — 시안 부재이므로 사양 시트 단일 진실 소스 기반 토큰·합성 컴포넌트 적용.
   - 합성 컴포넌트 적용: `SectionCard`(7섹션), `InfoRow`(주문 상세·주문자·배송지 12행), `StatusBadge`(상태 이력·연계 주문), `PriceBlock`(결제 정보), `ActionSlot`(푸터).
