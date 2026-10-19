@@ -82,6 +82,28 @@ export const fetchAllProducts = async () => {
 };
 
 /**
+ * 주어진 product_id 목록의 카테고리만 조회합니다. (매출 집계 미분류 보강용)
+ * order_items.category가 비어 있는 품목의 카테고리를 products에서 보강할 때 사용 —
+ * 전체 상품을 불러오지 않고 필요한 id만 `in` 조회한다. 빈 목록이면 조회 생략.
+ * @param {Array<string|number>} ids - product_id 목록
+ * @returns {Promise<Object>} { [product_id]: { category } }
+ * @throws {Error} 조회 실패 시 에러 발생
+ */
+export const getProductCategoriesByIds = async (ids) => {
+  const unique = [...new Set((ids || []).filter(Boolean))];
+  if (unique.length === 0) return {};
+  const { data, error } = await supabase
+    .from('products')
+    .select('id, category')
+    .in('id', unique);
+  if (error) {
+    console.error('Error fetching product categories by ids:', error);
+    throw error;
+  }
+  return Object.fromEntries((data || []).map((p) => [p.id, { category: p.category }]));
+};
+
+/**
  * 대분류(category)별 상품 개수를 집계합니다. (행사 판매 대분류 미리보기용)
  * @returns {Promise<Object>} { [category]: count } 형태. 예) { 검사: 340, 도서: 120, 도구: 25 }
  * @throws {Error} 조회 실패 시 에러 발생
