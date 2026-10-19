@@ -3,7 +3,8 @@
 > 이 시트는 어드민 신규 주문 등록 모달의 정보·기능·데이터 구조의 단일 진실 소스다.
 > 시안 부재 화면이므로 실 컴포넌트(`NewOrderModal.jsx`)가 사실상의 기획이다. 시안이 작성되면 이 시트에 모든 항목이 1:1로 반영되어야 한다.
 > 임의 단순화·통합·생략은 건우님의 명시적 승인 후 이 시트를 먼저 갱신한 다음에만 허용된다.
-> 마지막 갱신: 2026-10-19 **PIN 주문 분기 확장(사양·시안 단계)**(product-designer). "+신규 주문"에 **[PIN 주문]/[수기 주문] 분기**를 앞단에 추가. PIN 주문 생성 화면(학회 자동 선택·상품 0개 생성·PIN 4자리 크게 표시·복사) 신설. 수기 주문 = 현행 NewOrderModal **전면 보존**. 아래 "## PIN 주문 (현장 도움 주문) 확장" 참조. 시안 `PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`). 근거 `DOCS/PRD_현장도움주문.md` §4. (구현·DB는 별도 — 이번은 사양·시안만.)
+> 마지막 갱신: 2026-10-19 **order_items 스냅샷 컬럼 입력**(frontend-engineer). 어드민 신규 주문 insert에 `product_name/product_code/category/list_price` 4개 스냅샷을 `c.product`에서 채움(OrderSections `handleSaveItems` 정본과 동일). 그간 상품명·카테고리가 빈 채로 저장되던 부채 해소(실사고 #308·#311·#312·#314). `price_at_purchase`는 기존 `calcDiscountedPrice` 유지. DB 트리거(NULL일 때만 채움)와 이중 안전망. 검증: eslint 신규 0.
+> 이전 갱신: 2026-10-19 **PIN 주문 분기 확장(사양·시안 단계)**(product-designer). "+신규 주문"에 **[PIN 주문]/[수기 주문] 분기**를 앞단에 추가. PIN 주문 생성 화면(학회 자동 선택·상품 0개 생성·PIN 4자리 크게 표시·복사) 신설. 수기 주문 = 현행 NewOrderModal **전면 보존**. 아래 "## PIN 주문 (현장 도움 주문) 확장" 참조. 시안 `PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`). 근거 `DOCS/PRD_현장도움주문.md` §4. (구현·DB는 별도 — 이번은 사양·시안만.)
 > 이전 갱신: 2026-08-18 **할인 단가 유틸 경유**(frontend-engineer). `calcDiscountedPrice`와 검색 리스트 할인 표시 판정(`isDisc`)을 공용 유틸 `utils/pricing.js`(`getDiscountedUnit`/`getEffectiveRate`)로 교체 — `discount_override` 반영(실효율 = `discount_override ?? (is_discountable ? discountRate : 0)`). override가 NULL/undefined면 순수 no-op. 검증: build·pricing.test 14 passed·lint 신규 0.
 > 이전 갱신: 2026-05-29 신설 (M3-13 선행 — 시안 부재 단일 진실 소스 박기).
 
@@ -179,7 +180,7 @@
   - `customer_name, phone_number || null, shipping_address, event_id, is_on_site_sale, status: 'pending', total_cost, discount_amount, delivery_fee, final_payment`
 - [ ] insert order_items 페이로드:
   - `order_id, product_id, quantity, price_at_purchase: calcDiscountedPrice(product)`
-  - **스냅샷 컬럼(`product_name, product_code, category, list_price`) 누락** — `update_order_details` RPC는 채우지만 NewOrderModal의 insert는 안 채움. **부채**.
+  - 스냅샷 컬럼(`product_name, product_code, category, list_price`)을 `c.product`에서 채움 (2026-10-19 해소, OrderSections 정본과 동일).
 - [ ] 성공 시: `addNotification('신규 주문이 추가되었습니다.', 'success')` → `onSuccess?.()` (페이지 새로고침 트리거) → `onClose()`
 
 ### 자동 채워지는 필드 (insert에 명시되지 않으나 DB가 채움)
@@ -231,9 +232,8 @@
 - **확인 필요** — 어드민 등록 주문에 `customer_request`(배송 메모) 입력란이 없음. 학회 부스에서 “책 빨리요” 같은 요청을 받았을 때 어디에 적나? `admin_memo`로 대신 적으라는 흐름인지, 빠뜨린 기획인지 확인 필요.
 
 ### `order_items` (INSERT 페이로드)
-- 명시적 입력: `order_id, product_id, quantity, price_at_purchase`
-- **스냅샷 컬럼 미입력**: `product_name, product_code, category, list_price` (`20260415_002_add_order_item_snapshots.sql`에서 추가된 컬럼들)
-- 이로 인해 상품이 나중에 삭제되거나 가격이 바뀌면 “원래 어떤 상품을 어떤 가격에 샀는지” 추적 불가. `create-order` Edge Function과 `update_order_details` RPC는 모두 스냅샷을 채워 넣는데 NewOrderModal만 누락. **부채 — CTO 검수 권장**.
+- 명시적 입력: `order_id, product_id, quantity, price_at_purchase, product_name, product_code, category, list_price`
+- 스냅샷 컬럼(`product_name, product_code, category, list_price`, `20260415_002_add_order_item_snapshots.sql`)을 `c.product`에서 채움 (2026-10-19 해소). `create-order` Edge Function·`update_order_details` RPC와 동일하게 당시 상품 정보를 보존 → 상품 삭제·가격 변경 후에도 추적 가능. DB 트리거(NULL일 때만 채움)와 이중 안전망.
 
 ### `events` (조회)
 - `id, name, start_date, end_date, discount_rate` — 옵션 표시·할인 계산
@@ -257,7 +257,7 @@
 
 ## 핵심 발견 (CTO 검수 권장)
 
-1. **`order_items` 스냅샷 컬럼 누락 — 부채.** `create-order` Edge Function과 `update_order_details` RPC는 `product_name, product_code, category, list_price` 4개 스냅샷을 채우는데, 어드민 신규 주문 insert(line 220-225)는 안 채운다. 결과적으로 NewOrderModal로 등록된 주문은 향후 상품이 삭제·가격 변경됐을 때 “당시 어떤 가격이었나” 복구 불가. 출고 화면 엑셀 다운로드에서 product_name이 비는 사고 가능성. **CTO 결정 사안**.
+1. **`order_items` 스냅샷 컬럼 누락 — 해소됨(2026-10-19).** 어드민 신규 주문 insert가 `product_name, product_code, category, list_price` 4개 스냅샷을 `c.product`에서 채운다(`create-order`·`update_order_details`·OrderSections 정본과 동일). 그간 상품명·카테고리가 빈 채로 저장되던 사고(#308·#311·#312·#314) 해소. DB 트리거(NULL일 때만 보강)와 이중 안전망.
 
 2. **`status_history` 초기 항목 누락.** `create-order` Edge Function은 INSERT 시 `status_history: [{ status: 'pending', changed_at: now }]` 를 명시적으로 박지만(line 100), NewOrderModal은 안 박는다. DB 트리거(`append_status_history`)는 UPDATE OF status에 걸려 있어 INSERT 시 발화하지 않으므로, 어드민 등록 주문은 `pending` 첫 항목이 비어 있다가 첫 상태 변경 때 비로소 이력이 생긴다. OrderDetailModal의 “상태 이력” 섹션이 첫 변경 전까지 안 보이게 되는 UX 사고. **확인 필요**.
 
@@ -317,3 +317,4 @@
   - 정보 구조·필드·액션 전부 보존(좌 300→320px 패널, 학회 옵션 상태 뱃지·할인율 캡션, 주소 3필드 분리, 장바구니 ±/숫자/삭제 3컴포넌트, 현장판매 체크박스).
   - 보존: orders·order_items 직접 insert, 가격·할인·배송비 계산, Daum Modal, phone formatter, matchesSearch, 카테고리·인기 상품 필터.
   - 부채 6건은 손대지 않음(별도 사이클 — CTO 검수 권장).
+- 2026-10-19 **order_items 스냅샷 컬럼 입력**(frontend-engineer) — handleSave의 order_items insert에 `product_name/product_code/category/list_price`를 `c.product`에서 채움. 핵심 발견 1(스냅샷 누락 부채) 해소. 실사고 #308·#311·#312·#314 재발 방지. DB 트리거(NULL일 때만)와 이중 안전망. `price_at_purchase`·나머지 정보 구조 무변경. 검증: eslint 신규 0.

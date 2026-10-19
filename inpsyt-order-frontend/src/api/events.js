@@ -112,7 +112,8 @@ export const getOrdersForEventRevenue = async (eventId) => {
   const { data, error } = await supabase
     .from('orders')
     // 합배송 껍데기 부모 제외(설계 §7) — 실 매출은 자식 order_items 기반.
-    .select('status, delivery_fee, is_group_parent, order_items(product_id, category, price_at_purchase, quantity)')
+    // created_at·status_history = 일차별 집계(결제 완료 KST) 기준.
+    .select('status, delivery_fee, is_group_parent, created_at, status_history, order_items(product_id, category, price_at_purchase, quantity)')
     .eq('is_group_parent', false)
     .eq('event_id', eventId);
 
