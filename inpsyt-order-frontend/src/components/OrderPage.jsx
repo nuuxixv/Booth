@@ -28,6 +28,9 @@ import { getDiscountedUnit } from '../utils/pricing';
 import { hasOnlineCode } from '../utils/onlineCode';
 import { isValidMobile, formatPhone, QA_TEST_PHONE_DIGITS } from '../utils/formatPhone';
 import { loadOrderDraft, saveOrderDraft, clearOrderDraft, DEFAULT_CUSTOMER_INFO } from '../utils/orderDraft';
+import { submitHelperOrder } from '../api/helperOrder';
+import { CartHoldGuidance, ReadOnlyItemsCard, PreparedEmptyState } from './PinOrderParts';
+import { PriceBlock } from './ui';
 
 const OrderPage = () => {
   const theme = useTheme();
@@ -81,6 +84,10 @@ const OrderPage = () => {
   const [inpsytConfirmOpen, setInpsytConfirmOpen] = useState(false);
   const [eventInfo, setEventInfo] = useState(null);
   const [accessError, setAccessError] = useState(null); // 'no_slug' | 'expired' | 'not_found'
+
+  // PIN(현장 도움) 흐름 — null이면 일반 3단계 그대로. 전환 시에만 활성.
+  // { code, data, step: 'cart-hold' | 'items' | 'shipping' }
+  const [pinFlow, setPinFlow] = useState(null);
 
   // Computed values
   const discountRate = eventInfo ? eventInfo.discount_rate : 0;
@@ -143,7 +150,7 @@ const OrderPage = () => {
         // 해당 컬럼을 뺀 레거시 select로 재조회 → 전체 노출(기존 동작)로 graceful fallback.
         let { data: eventData, error: eventError } = await supabase
           .from('events')
-          .select('id, name, discount_rate, tags, host_society, start_date, end_date, estimated_delivery_date, visible_categories')
+          .select('id, name, discount_rate, tags, host_society, start_date, end_date, estimated_delivery_date, visible_categories, closed_at')
           .eq('order_url_slug', eventSlug)
           .single();
 
@@ -160,7 +167,9 @@ const OrderPage = () => {
         if (eventError || !eventData) {
           setAccessError('not_found');
           setEventInfo(null);
-        } else if (eventData.end_date < today || eventData.start_date > today) {
+        } else if (eventData.closed_at || eventData.end_date < today || eventData.start_date > today) {
+          // closed_at: 학회 종료 처리됨(링크 닫힘). 레거시 fallback select엔 closed_at이 없어
+          // undefined→열린 학회로 취급되지만 서버 create-order·PIN RPC가 종료 학회를 따로 막는다.
           setAccessError('expired');
           setEventInfo(null);
         } else {
@@ -302,6 +311,60 @@ const OrderPage = () => {
     clearOrderDraft(eventSlug);
   };
 
+  // ── PIN(현장 도움) 주문 — 전환·전개·제출은 모두 OrderPage에서. 일반 흐름과 분리. ──
+  // 검색창에서 살아 있는 PIN을 눌러 전환. 장바구니가 비어 있지 않으면 먼저 보유 안내(cart-hold).
+  const handlePinContinue = (code, data) => {
+    setError(null);
+    setPinFlow({ code, data, step: hasCartItems ? 'cart-hold' : 'items' });
+    window.scrollTo(0, 0);
+  };
+
+  // 뒤로 — 장바구니는 그대로 유지(sessionStorage 보존 규칙과 정합). 담은 상품은 넘기지 않음.
+  const handlePinCancel = () => {
+    setError(null);
+    setPinFlow(null);
+    window.scrollTo(0, 0);
+  };
+
+  const handlePinStep = (step) => {
+    setError(null);
+    setPinFlow(prev => (prev ? { ...prev, step } : prev));
+    window.scrollTo(0, 0);
+  };
+
+  const handleSubmitPinOrder = async () => {
+    // 배송지 필수값 — 일반 Step1 게이트와 동일 문구·방식 재사용. 상품 0개 제출은 허용.
+    if (!customerInfo.name || !customerInfo.phone || !customerInfo.address || !customerInfo.detailAddress) {
+      setError('필수 정보(성함, 연락처, 배송지)를 입력해주세요.');
+      return;
+    }
+    if (!isValidMobile(customerInfo.phone)) {
+      setError('휴대폰 번호를 확인해주세요.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const result = await submitHelperOrder({ eventId: eventInfo.id, code: pinFlow.code, customerInfo });
+      clearOrderDraft(eventSlug);
+      const token = result?.access_token;
+      if (token) {
+        navigate(`/order/status/${token}`);
+      } else {
+        setError('주문 처리 중 오류가 발생했습니다.');
+      }
+    } catch (err) {
+      // P0002: 없는/제출된/다른 학회/종료 후 PIN → 중립 안내로 매핑.
+      const msg = err?.code === 'P0002'
+        ? '안내 번호를 다시 확인해 주세요. 담당자에게 받은 번호가 맞나요?'
+        : `주문 처리 중 오류가 발생했습니다: ${err.message}`;
+      setError(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
 
   // Loading state
   if (loading) {
@@ -390,6 +453,90 @@ const OrderPage = () => {
         <Box sx={{ flex: 1 }} />
       </Box>
 
+      {pinFlow ? (
+        /* PIN(현장 도움) 흐름 — 일반 3단계 대신 담긴 상품 보기 → 배송지 → 제출. */
+        <Box sx={{ flex: 1, overflowY: 'auto', pb: '40px' }}>
+          {error && (
+            <Alert
+              severity="error"
+              onClose={() => setError(null)}
+              sx={{ mx: 2, mt: 2, borderRadius: `${theme.radii.md}px` }}
+            >
+              {error}
+            </Alert>
+          )}
+
+          {pinFlow.step === 'cart-hold' && (
+            <Box sx={{ px: 2, pt: 2 }}>
+              <CartHoldGuidance
+                cartCount={validCartItems.length}
+                onBack={handlePinCancel}
+                onContinue={() => handlePinStep('items')}
+              />
+            </Box>
+          )}
+
+          {pinFlow.step === 'items' && (
+            <Box sx={{ px: 2, pt: 2 }}>
+              <Box sx={{ mb: 2.5, textAlign: 'center' }}>
+                <Typography variant="h3" sx={{ fontWeight: 800, mb: 0.5 }}>담당자가 준비한 주문</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  안내 번호 {pinFlow.code}{eventInfo?.name ? ` · ${eventInfo.name}` : ''}
+                </Typography>
+              </Box>
+              {pinFlow.data?.has_items ? (
+                <>
+                  <Typography variant="overline" sx={{ color: 'text.secondary', display: 'block', mb: 1.25 }}>주문 상품</Typography>
+                  <ReadOnlyItemsCard items={pinFlow.data.order_items} />
+                  <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: `${theme.radii.md}px`, p: 2, mb: 2 }}>
+                    <PriceBlock
+                      rows={[{ label: '배송비', value: (pinFlow.data.delivery_fee ?? 0) === 0 ? '무료' : pinFlow.data.delivery_fee }]}
+                      totalLabel="예상 결제금액"
+                      totalValue={pinFlow.data.final_payment}
+                    />
+                  </Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                    상품은 담당자가 준비했어요. 수정이 필요하면 담당자에게 말씀해 주세요.
+                  </Typography>
+                </>
+              ) : (
+                <PreparedEmptyState />
+              )}
+              <Box sx={{ pt: 3 }}>
+                <Button variant="contained" fullWidth size="large" onClick={() => handlePinStep('shipping')}>
+                  배송지 입력하기
+                </Button>
+                {/* 오입력 PIN 탈출 경로 — 상품 선택 화면으로 복귀(장바구니 유지). */}
+                <Button variant="text" fullWidth size="large" onClick={handlePinCancel} sx={{ mt: 1 }}>
+                  뒤로 가기
+                </Button>
+              </Box>
+            </Box>
+          )}
+
+          {pinFlow.step === 'shipping' && (
+            <>
+              <CustomerInfoStep
+                customerInfo={customerInfo}
+                setCustomerInfo={setCustomerInfo}
+                hasOnlineCode={hasOnlineCode(pinFlow.data?.order_items || [])}
+                isOnsitePurchase={false}
+                eventName={eventInfo?.name || ''}
+              />
+              <Box sx={{ px: 2, pb: 4 }}>
+                <Button variant="contained" fullWidth size="large" disabled={isSubmitting} onClick={handleSubmitPinOrder}>
+                  {isSubmitting ? '제출 중…' : '주문 제출하기'}
+                </Button>
+                {/* 담긴 상품 화면으로 복귀. */}
+                <Button variant="text" fullWidth size="large" disabled={isSubmitting} onClick={() => handlePinStep('items')} sx={{ mt: 1 }}>
+                  뒤로 가기
+                </Button>
+              </Box>
+            </>
+          )}
+        </Box>
+      ) : (
+      <>
       {/* Step indicator - 3단계 전체 표시 (Step 0 포함, 2026-06-01 건우님) */}
       <OrderStepIndicator activeStep={activeStep} />
 
@@ -414,6 +561,9 @@ const OrderPage = () => {
             eventTags={[...new Set([...(eventInfo?.tags || []), eventInfo?.host_society].filter(Boolean))]}
             eventName={eventInfo?.name || ''}
             visibleCategories={eventInfo?.visible_categories}
+            enablePinEntry
+            eventId={eventInfo?.id}
+            onPinContinue={handlePinContinue}
           />
         )}
 
@@ -440,34 +590,40 @@ const OrderPage = () => {
           />
         )}
       </Box>
+      </>
+      )}
       </Box>
 
-      {/* Floating bottom bar */}
-      <FloatingBottomBar
-        activeStep={activeStep}
-        cart={cart}
-        totalPrice={shippingBasisTotal}
-        freeShippingThreshold={settings.free_shipping_threshold}
-        isOnsitePurchase={isOnsitePurchase}
-        onNext={handleNext}
-        onBack={handleBack}
-        onSubmit={handleSubmitClick}
-        onCartClick={() => setCartSheetOpen(true)}
-        isSubmitting={isSubmitting}
-        isSubmittable={isSubmittable}
-      />
+      {/* Floating bottom bar — PIN 흐름에서는 자체 CTA를 쓰므로 숨김 */}
+      {!pinFlow && (
+        <FloatingBottomBar
+          activeStep={activeStep}
+          cart={cart}
+          totalPrice={shippingBasisTotal}
+          freeShippingThreshold={settings.free_shipping_threshold}
+          isOnsitePurchase={isOnsitePurchase}
+          onNext={handleNext}
+          onBack={handleBack}
+          onSubmit={handleSubmitClick}
+          onCartClick={() => setCartSheetOpen(true)}
+          isSubmitting={isSubmitting}
+          isSubmittable={isSubmittable}
+        />
+      )}
 
-      <CartBottomSheet
-        open={cartSheetOpen}
-        onClose={() => setCartSheetOpen(false)}
-        onOpen={() => setCartSheetOpen(true)}
-        cart={cart}
-        onCartChange={setCart}
-        discountRate={discountRate}
-        isOnsitePurchase={isOnsitePurchase}
-        settings={settings}
-        onProceed={handleProceedToInfo}
-      />
+      {!pinFlow && (
+        <CartBottomSheet
+          open={cartSheetOpen}
+          onClose={() => setCartSheetOpen(false)}
+          onOpen={() => setCartSheetOpen(true)}
+          cart={cart}
+          onCartChange={setCart}
+          discountRate={discountRate}
+          isOnsitePurchase={isOnsitePurchase}
+          settings={settings}
+          onProceed={handleProceedToInfo}
+        />
+      )}
 
       {/* Success dialog — 사양 §성공 다이얼로그. 실 플로우에선 access_token 있을 때 navigate가 우선, 이 다이얼로그는 fallback. */}
       <Dialog
