@@ -13,7 +13,7 @@ const PRODUCTS = [
   { id: 3, name: '검사C 코드', category: '검사', is_discountable: false, is_popular: false, is_new: false, includes_online_code: true, tags: ['오티즘'], test_group_id: 10, list_price: 1000 },
   { id: 4, name: '검사D 미확인', category: '검사', is_discountable: false, is_popular: true, is_new: false, includes_online_code: null, tags: [], list_price: 1000 },
   { id: 5, name: '도구E 비할인', category: '도구', is_discountable: false, is_popular: false, is_new: false, includes_online_code: false, tags: ['신간'], list_price: 1000 },
-  { id: 6, name: '분류누락F', category: '', is_discountable: false, is_popular: false, is_new: false, includes_online_code: null, tags: [], list_price: 1000 },
+  { id: 6, name: '도구F 숨김', category: '도구', is_discountable: false, is_popular: false, is_new: false, is_active: false, includes_online_code: false, tags: [], list_price: 1000 },
 ];
 
 vi.mock('../supabaseClient', () => ({ supabase: { from: vi.fn(), rpc: vi.fn() } }));
@@ -58,11 +58,12 @@ const facetGroup = (label) => screen.getAllByText(label, { selector: 'span' })
 const clickFacet = (label, option) => fireEvent.click(within(facetGroup(label)).getByRole('button', { name: option }));
 
 describe('ProductManagementPage 필터 바', () => {
-  it('초기: 필터 초기화 disabled, 미확인은 카테고리·온라인코드 끝', async () => {
+  it('초기: 필터 초기화 disabled, 카테고리는 전체-검사-도서-도구(미확인 없음), 온라인코드 미확인은 끝', async () => {
     await renderPage();
     expect(screen.getByRole('button', { name: '필터 초기화' })).toBeDisabled();
     const catButtons = within(facetGroup('카테고리')).getAllByRole('button').map((b) => b.textContent);
-    expect(catButtons).toEqual(['도서', '검사', '도구', '미확인']);
+    expect(catButtons).toEqual(['전체', '검사', '도서', '도구']);
+    expect(within(facetGroup('카테고리')).getByRole('button', { name: '전체' })).toHaveAttribute('aria-pressed', 'true');
     const onlineButtons = within(facetGroup('온라인코드')).getAllByRole('button').map((b) => b.textContent);
     expect(onlineButtons).toEqual(['전체', 'Y', 'N', '미확인']);
     expect(visibleNames()).toHaveLength(6);
@@ -77,16 +78,29 @@ describe('ProductManagementPage 필터 바', () => {
     expect(screen.getByRole('button', { name: '필터 초기화' })).toBeEnabled();
   });
 
-  it('카테고리 미확인 = 도서·검사·도구 외 값', async () => {
+  it('카테고리 다중 선택(OR): 도서 + 도구, 전체를 누르면 해제', async () => {
     await renderPage();
-    clickFacet('카테고리', '미확인');
-    await waitFor(() => expect(visibleNames()).toEqual(['분류누락F']));
+    clickFacet('카테고리', '도서');
+    clickFacet('카테고리', '도구');
+    await waitFor(() => expect(visibleNames().sort()).toEqual(['도구E 비할인', '도구F 숨김', '도서A 할인인기', '도서B 비할인'].sort()));
+    expect(within(facetGroup('카테고리')).getByRole('button', { name: '전체' })).toHaveAttribute('aria-pressed', 'false');
+    clickFacet('카테고리', '전체');
+    await waitFor(() => expect(visibleNames()).toHaveLength(6));
+    expect(within(facetGroup('카테고리')).getByRole('button', { name: '전체' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('판매상태(고객 주문서 노출) N = 숨김 상품만', async () => {
+    await renderPage();
+    clickFacet('판매상태', 'N');
+    await waitFor(() => expect(visibleNames()).toEqual(['도구F 숨김']));
+    clickFacet('판매상태', 'Y');
+    await waitFor(() => expect(visibleNames()).toHaveLength(5));
   });
 
   it('온라인코드 미확인은 검사 한정이 아님', async () => {
     await renderPage();
     clickFacet('온라인코드', '미확인');
-    await waitFor(() => expect(visibleNames().sort()).toEqual(['검사D 미확인', '분류누락F'].sort()));
+    await waitFor(() => expect(visibleNames()).toEqual(['검사D 미확인']));
   });
 
   it('태그 OR + 학회명이 앞쪽', async () => {
@@ -112,13 +126,19 @@ describe('ProductManagementPage 필터 바', () => {
     expect(within(facetGroup('인기 상품')).getByRole('button', { name: '전체' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('검사 선택 시 검사군 그룹 뷰 + 검사군 추가 버튼, 재클릭 시 전체로 해제', async () => {
+  it('검사 단독 선택 시에만 검사군 그룹 뷰 + 검사군 추가 버튼, 재클릭 시 전체로 해제', async () => {
     await renderPage();
     expect(screen.queryByRole('button', { name: '검사군 추가' })).toBeNull();
     clickFacet('카테고리', '검사');
     await screen.findByText('테스트검사군');
     expect(screen.getByText('미분류')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '검사군 추가' })).toBeInTheDocument();
+    // 다른 카테고리와 함께 고르면 평면 표
+    clickFacet('카테고리', '도서');
+    await waitFor(() => expect(screen.queryByText('테스트검사군')).toBeNull());
+    expect(screen.queryByRole('button', { name: '검사군 추가' })).toBeNull();
+    clickFacet('카테고리', '도서');
+    await screen.findByText('테스트검사군');
     clickFacet('카테고리', '검사');
     await waitFor(() => expect(screen.queryByText('테스트검사군')).toBeNull());
     expect(visibleNames()).toHaveLength(6);
