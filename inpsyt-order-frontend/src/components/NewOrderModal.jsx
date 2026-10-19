@@ -222,6 +222,10 @@ const NewOrderModal = ({ open, onClose, onSuccess, events = [], products = [], s
         product_id: c.product.id,
         quantity: c.quantity,
         price_at_purchase: calcDiscountedPrice(c.product),
+        product_name: c.product.name || null,
+        product_code: c.product.product_code || null,
+        category: c.product.category || null,
+        list_price: c.product.list_price || null,
       }));
       const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
       if (itemsError) throw itemsError;
