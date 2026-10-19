@@ -33,6 +33,7 @@ const OrderManagementPreviewC2 = lazy(() => import('./components/OrderManagement
 const OrderManagementPreviewC3 = lazy(() => import('./components/OrderManagementPreviewC3'));
 const OrderManagementPreviewC4 = lazy(() => import('./components/OrderManagementPreviewC4'));
 const ProductManagementPreview = lazy(() => import('./components/ProductManagementPreview'));
+const ProductFilterBarPreview = lazy(() => import('./components/ProductFilterBarPreview'));
 const EventManagementPreview = lazy(() => import('./components/EventManagementPreview'));
 const EventHubListPreview = lazy(() => import('./components/EventHubListPreview'));
 const EventDetailPreview = lazy(() => import('./components/EventDetailPreview'));
@@ -74,6 +75,7 @@ function AppRoutes() {
         <Route path="/preview/dashboard" element={<DashboardDesignPreview />} />
         <Route path="/preview/fulfillment" element={<FulfillmentPreview />} />
         <Route path="/preview/products" element={<ProductManagementPreview />} />
+        <Route path="/preview/product-filters" element={<ProductFilterBarPreview />} />
         <Route path="/preview/events" element={<EventManagementPreview />} />
         <Route path="/preview/event-hub" element={<EventHubListPreview />} />
         <Route path="/preview/event-detail" element={<EventDetailPreview />} />
