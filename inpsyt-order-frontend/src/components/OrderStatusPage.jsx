@@ -9,6 +9,8 @@ import { ko } from 'date-fns/locale';
 import { InfoRow, PriceBlock } from './ui';
 import { AutoRefreshStrip } from './PinOrderParts';
 import { formatPhone } from '../utils/formatPhone';
+import { useVoucherConfig } from '../hooks/useVoucherConfig';
+import { withObjectParticle, cardAmountOf } from '../utils/voucherConfig';
 
 // 준비중(현장 도움) 자동 갱신 간격 — 준비중일 때만. 결제대기가 되면 멈춘다.
 const PREPARING_POLL_MS = 5000;
@@ -95,6 +97,7 @@ const OrderStatusPage = () => {
   const theme = useTheme();
   const white = theme.palette.common.white;
   const { token } = useParams();
+  const voucherLabel = useVoucherConfig().label;
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -169,6 +172,14 @@ const OrderStatusPage = () => {
   const isCancelled = ['cancelled', 'refunded'].includes(order.status);
   const isPreparing = order.status === 'preparing';
 
+  // 이벤트(바우처·배송비 면제) — 마이그레이션 적용 후에만 응답에 필드가 온다(없으면 기존 화면 그대로).
+  // A13 §⑥: 결제대기+voucher_enabled 안내 / voucher_amount>0 카드·바우처 내역 / shipping_waived 배송비 "면제".
+  const voucherAmount = order.voucher_amount || 0;
+  const deliveryFeeValue = order.shipping_waived
+    ? '면제'
+    : (order.delivery_fee ?? 0) === 0 ? '무료' : order.delivery_fee;
+  const showVoucherNotice = order.status === 'pending' && order.events?.voucher_enabled;
+
   // 합배송 안내 문구 1줄 — 형제 정보는 표시하지 않고 이름만 노출(상품·연락처·주소·금액 미노출).
   let groupNotice = null;
   if (order.is_grouped) {
@@ -230,16 +241,34 @@ const OrderStatusPage = () => {
             <SectionTitle>주문 상품</SectionTitle>
             <ItemsCard items={order.order_items} />
 
-            <Box sx={{ bgcolor: 'background.paper', border: `1px solid ${theme.palette.divider}`, borderRadius: `${theme.radii.md}px`, p: 2, mb: 3 }}>
+            <Box sx={{ bgcolor: 'background.paper', border: `1px solid ${theme.palette.divider}`, borderRadius: `${theme.radii.md}px`, p: 2, mb: showVoucherNotice ? 1.5 : 3 }}>
               <PriceBlock
                 rows={[
-                  { label: '배송비', value: (order.delivery_fee ?? 0) === 0 ? '무료' : order.delivery_fee },
+                  { label: '배송비', value: deliveryFeeValue },
                 ]}
                 totalLabel="최종 결제금액"
                 totalValue={order.final_payment}
                 totalColor={bannerColor}
               />
+              {/* 결제완료 이후 — 카드 결제액·바우처 내역(바우처가 있을 때만). */}
+              {voucherAmount > 0 && (
+                <Typography
+                  variant="caption"
+                  sx={{ display: 'block', mt: 1, textAlign: 'right', color: 'text.secondary', fontFeatureSettings: '"tnum" 1' }}
+                >
+                  카드 결제 {cardAmountOf(order).toLocaleString()}원 · {voucherLabel} {voucherAmount.toLocaleString()}원
+                </Typography>
+              )}
             </Box>
+
+            {/* 결제대기 + 이벤트 적용 학회 — 바우처 지참 안내(고객은 직접 선택하지 않음). */}
+            {showVoucherNotice && (
+              <Box sx={{ bgcolor: theme.gray[50], border: `1px solid ${theme.palette.divider}`, borderRadius: `${theme.radii.md}px`, p: 1.5, mb: 3 }}>
+                <Typography variant="caption" color="text.secondary">
+                  ※ {withObjectParticle(voucherLabel)} 사용하시면 결제할 때 담당자에게 {withObjectParticle(voucherLabel)} 함께 내 주세요.
+                </Typography>
+              </Box>
+            )}
 
             <SectionTitle>주문자 정보</SectionTitle>
             <OrdererInfoCard order={order} groupNotice={groupNotice} />

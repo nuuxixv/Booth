@@ -138,22 +138,32 @@ describe('normalizeEventPayload', () => {
     expect(out).not.toHaveProperty('_nameTouched');
     expect(out).not.toHaveProperty('created_by');
   });
+  it('voucher_enabled boolean 강제 — true/truthy → true, undefined/null/falsy → false (A13)', () => {
+    expect(normalizeEventPayload({ ...emptyEvent(), voucher_enabled: true }).voucher_enabled).toBe(true);
+    expect(normalizeEventPayload({ ...emptyEvent(), voucher_enabled: 1 }).voucher_enabled).toBe(true);
+    expect(normalizeEventPayload(emptyEvent()).voucher_enabled).toBe(false);
+    const noKey = { ...emptyEvent() };
+    delete noKey.voucher_enabled;
+    expect(normalizeEventPayload(noKey).voucher_enabled).toBe(false);
+  });
 });
 
 // 학회 개선 트랙 2차(2026-10-12) — 신규 5컬럼 + venue 라운드트립 소거 방지(2026-06-25 사고 재발 방지).
 describe('2차 신규 컬럼(설치/철거·장소 3분리) 라운드트립', () => {
   const NEW_COLS = ['setup_time', 'teardown_time', 'venue_name', 'venue_address', 'venue_detail'];
 
-  it('FORM_FIELDS에 신규 5컬럼 + 기존 venue 모두 포함', () => {
+  it('FORM_FIELDS에 신규 5컬럼 + 기존 venue + voucher_enabled 모두 포함', () => {
     NEW_COLS.forEach((k) => expect(FORM_FIELDS).toContain(k));
     expect(FORM_FIELDS).toContain('venue');
-    expect(FORM_FIELDS).toHaveLength(19);
+    expect(FORM_FIELDS).toContain('voucher_enabled');
+    expect(FORM_FIELDS).toHaveLength(20);
   });
 
-  it('emptyEvent 기본값 — 신규 5컬럼 "" · venue "" 존치', () => {
+  it('emptyEvent 기본값 — 신규 5컬럼 "" · venue "" 존치 · voucher_enabled false', () => {
     const e = emptyEvent();
     NEW_COLS.forEach((k) => expect(e[k]).toBe(''));
     expect(e.venue).toBe('');
+    expect(e.voucher_enabled).toBe(false);
   });
 
   it('normalizeEventPayload가 신규 5컬럼과 venue 값을 payload에 보존', () => {

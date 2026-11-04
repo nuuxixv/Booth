@@ -68,6 +68,8 @@ const OrderDetailModal = ({ order, open, onClose, statusToKorean, productsMap, p
   const isMaster = hasPermission('master');
   // 이미 그룹의 일부(자식)면 연계 연결 불가
   const canLink = canEdit && !order.parent_order_id && !order.is_group_parent;
+  // 이벤트가 적용된 주문(바우처·배송비 면제)은 합배송으로 묶을 수 없음(A13 §⑤)
+  const voucherApplied = (order.voucher_amount || 0) > 0 || Boolean(order.shipping_waived);
 
   const WrapperComponent = isMobile ? Drawer : Modal;
   const wrapperProps = isMobile
@@ -123,14 +125,16 @@ const OrderDetailModal = ({ order, open, onClose, statusToKorean, productsMap, p
           <SectionCard
             title="합배송 연계"
             padding={20}
-            action={(
+            action={!voucherApplied ? (
               <Button size="small" variant="outlined" startIcon={<LinkIcon sx={{ fontSize: 16 }} />} onClick={() => setLinkDialogOpen(true)}>
                 합배송 만들기
               </Button>
-            )}
+            ) : null}
           >
             <Typography variant="body2" color="text.secondary">
-              같은 학회의 다른 주문과 묶어 한 주소로 함께 배송할 수 있습니다. 합배송한 뒤에는 다시 나눌 수 없습니다.
+              {voucherApplied
+                ? '이벤트가 적용된 주문은 합배송으로 묶을 수 없어요.'
+                : '같은 학회의 다른 주문과 묶어 한 주소로 함께 배송할 수 있습니다. 합배송한 뒤에는 다시 나눌 수 없습니다.'}
             </Typography>
           </SectionCard>
         )}

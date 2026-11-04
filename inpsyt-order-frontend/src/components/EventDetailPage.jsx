@@ -35,6 +35,7 @@ import {
   Map as MapIcon,
   AutoAwesomeMotion as TemplateIcon,
   WarningAmberOutlined as WarningIcon,
+  ConfirmationNumber as VoucherIcon,
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import { supabase } from '../supabaseClient';
@@ -43,6 +44,7 @@ import { useNotification } from '../hooks/useNotification';
 import { getEventStatusKST } from '../utils/date';
 import { numberToKoreanCurrency } from '../utils/koreanCurrency';
 import { computeRevenueByCategory } from '../utils/revenueByCategory';
+import { useVoucherConfig } from '../hooks/useVoucherConfig';
 import { CATEGORY_COLORS } from '../constants/categoryColors';
 import {
   getEventBySlug, updateEventProgress, updateEventPrepNote, getOrdersForEventRevenue,
@@ -115,6 +117,28 @@ const DiscountChip = ({ rate }) => {
         sx={{ fontWeight: 700, color: theme.accent.revenue, lineHeight: 1, fontFeatureSettings: '"tnum" 1' }}
       >
         {percent}%
+      </Typography>
+    </Box>
+  );
+};
+
+// 이벤트 적용(바우처·배송비 면제) 켜짐 칩 — 할인율 칩 옆. voucher_enabled일 때만 렌더(A13 §②).
+const VoucherAppliedChip = () => {
+  const theme = useTheme();
+  return (
+    <Box
+      sx={{
+        display: 'inline-flex', alignItems: 'center', gap: 0.375,
+        px: 0.75, py: 0.25,
+        borderRadius: `${theme.radii.sm}px`,
+        bgcolor: alpha(theme.accent.shipping, 0.1),
+        border: `1px solid ${alpha(theme.accent.shipping, 0.2)}`,
+        flexShrink: 0,
+      }}
+    >
+      <VoucherIcon sx={{ fontSize: 11, color: theme.accent.shipping }} />
+      <Typography variant="caption" sx={{ fontWeight: 700, color: theme.accent.shipping, lineHeight: 1 }}>
+        이벤트 적용
       </Typography>
     </Box>
   );
@@ -331,6 +355,7 @@ const EventDetailPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, profile, hasPermission } = useAuth();
   const { addNotification } = useNotification();
+  const voucherConfig = useVoucherConfig(); // 이벤트 결제수단 용어(바우처 카드·입금결의서) — A13 §⑧⑨
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   // 지도 버튼은 터치 기기에서만 노출(현장 태블릿·폰). 너비가 아니라 터치 입력으로 판정(건우님 2026-10-12).
   const isTouchDevice = useMediaQuery('(hover: none) and (pointer: coarse)');
@@ -691,6 +716,7 @@ const EventDetailPage = () => {
         productsMap,
         authorName: profile?.name || '',
         department: profile?.department || '',
+        voucherLabel: voucherConfig.label,
       });
       // exportDepositResolution이 unclassified를 반환하면(집계 외 매출) 경고. 미반환이면 0으로 방어.
       const unclassified = result?.unclassified ?? 0;
@@ -799,10 +825,11 @@ const EventDetailPage = () => {
         }
         icon={EventNoteIcon}
       />
-      {/* 상태배지 + 할인율 — 헤더 직하 */}
+      {/* 상태배지 + 할인율 + (이벤트 적용 켜짐) — 헤더 직하 */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3, mt: -1 }}>
         <EventStateBadge start={event.start_date} end={event.end_date} />
         <DiscountChip rate={event.discount_rate} />
+        {event.voucher_enabled && <VoucherAppliedChip />}
       </Box>
 
       {/* 진행 요약 바 */}
@@ -1112,25 +1139,33 @@ const EventDetailPage = () => {
                       color={theme.accent.revenue}
                     />
                   </Box>
-                  {/* 검사/도서/도구 3버킷(도구 독립, 2026-06-24). 0원 버킷 숨김 → 1~3열 동적 분할. */}
+                  {/* 검사/도서/도구 3버킷(도구 독립, 2026-06-24). 0원 버킷 숨김 → 1~3열 동적 분할.
+                      A13 §⑨: 카테고리 카드 = 카드 결제액(버킷 − 버킷 바우처), 노출 조건은 총 매출 버킷 > 0.
+                      바우처 합계 > 0이면 "{용어} 결제" 카드 추가. */}
                   <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: { xs: 2, sm: 3 } }}>
-                    {[
-                      { key: 'test', label: '검사 판매', revenue: revenue.test, shipping: revenue.testShipping, icon: TestIcon, color: theme.accent.tests },
-                      { key: 'book', label: '도서 판매', revenue: revenue.book, shipping: revenue.bookShipping, icon: BookIcon, color: theme.accent.books },
-                      { key: 'tool', label: '도구 판매', revenue: revenue.tool, shipping: revenue.toolShipping, icon: ToolIcon, color: CATEGORY_COLORS.tool },
-                    ]
-                      .filter(b => b.revenue > 0)
-                      .map(b => (
+                    {(() => {
+                      const cards = [
+                        { key: 'test', label: '검사 판매', revenue: revenue.test, voucher: revenue.testVoucher, shipping: revenue.testShipping, icon: TestIcon, color: theme.accent.tests },
+                        { key: 'book', label: '도서 판매', revenue: revenue.book, voucher: revenue.bookVoucher, shipping: revenue.bookShipping, icon: BookIcon, color: theme.accent.books },
+                        { key: 'tool', label: '도구 판매', revenue: revenue.tool, voucher: revenue.toolVoucher, shipping: revenue.toolShipping, icon: ToolIcon, color: CATEGORY_COLORS.tool },
+                      ]
+                        .filter(b => b.revenue > 0)
+                        .map(b => ({ key: b.key, label: `${b.label} (배송비 ${won(b.shipping)}원 포함)`, value: b.revenue - (b.voucher || 0), icon: b.icon, color: b.color }));
+                      if (revenue.voucher > 0) {
+                        cards.push({ key: 'voucher', label: `${voucherConfig.label} 결제`, value: revenue.voucher, icon: VoucherIcon, color: theme.accent.shipping });
+                      }
+                      return cards.map(b => (
                         <Box key={b.key} sx={{ flex: 1, minWidth: 0 }}>
                           <StatCard
-                            label={`${b.label} (배송비 ${won(b.shipping)}원 포함)`}
-                            value={won(b.revenue)}
+                            label={b.label}
+                            value={won(b.value)}
                             unit="원"
                             icon={b.icon}
                             color={b.color}
                           />
                         </Box>
-                      ))}
+                      ));
+                    })()}
                   </Box>
                 </Box>
               ) : (

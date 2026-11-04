@@ -77,6 +77,7 @@
   - **도서 판매 (배송비 포함)** (`bookRevenue`) — `BookIcon`, color `theme.accent.books`
   - **도구 판매 (배송비 포함)** (`toolRevenue`) — `ToolIcon`(Build), color `CATEGORY_COLORS.tool` (#6B7684) — **도구 독립 버킷(2026-06-24 건우님 확정, 도구-검사 합산 정책 영구 폐지)**
   - (배송비 단독 카드 폐기 — 검사/도구/도서 우선순위로 1곳 흡수)
+  - **바우처(이벤트 결제수단, A13 §⑨, 2026-11-04):** 검사·도서·도구 카드 금액 = **카드 결제액**(버킷 − 버킷 바우처). 노출 조건은 그대로 **총 매출 버킷 > 0**(바우처로 전액 결제된 카테고리도 카드가 사라지지 않음). 바우처 합계(`voucher`) > 0이면 **"{용어} 결제" 카드 1장 추가**(`VoucherIcon`=ConfirmationNumber, color `theme.accent.shipping`, 금액=`voucher`). 바우처 0이면 렌더 안 함(기존 화면 회귀 0). `ordersQ` select에 `voucher_amount` 추가, 용어 = `useVoucherConfig().label`. 상세·단일 소스 = `A13_VoucherEvent.md`.
 - [ ] `CompactKpi` 컴포넌트 형식 (line 51-72):
   - 아이콘 박스 (정사각, fontSize 28, color bg)
   - title (variant caption, fontWeight 600, text.secondary)
@@ -249,7 +250,8 @@
 
 ### 집계 산출 객체 `dashboardData` (state)
 - `eventName` (string)
-- `totalRevenue`, `bookRevenue`, `testRevenue`, `toolRevenue` (number, 원). **검사·도서·도구는 배송비 포함값. `shippingRevenue` 폐기(2026-06-02).** `testShipping`/`bookShipping`/`toolShipping` 각 버킷 귀속 배송비. total = test + book + tool + unclassified (2026-06-24 도구 독립 3버킷).
+- `totalRevenue`, `bookRevenue`, `testRevenue`, `toolRevenue` (number, 원). **검사·도서·도구는 배송비 포함값(총 매출, 바우처 포함). `shippingRevenue` 폐기(2026-06-02).** `testShipping`/`bookShipping`/`toolShipping` 각 버킷 귀속 배송비. total = test + book + tool + unclassified (2026-06-24 도구 독립 3버킷).
+- `testVoucher`/`bookVoucher`/`toolVoucher`/`voucher` (number, 원, A13 §⑨ 2026-11-04) — 버킷별 바우처 결제분·합계. 카드 결제액 = 버킷 − 버킷 바우처(렌더에서 계산). 바우처 없는 학회는 전부 0.
 - `yoyPct` (number | null) — 전년 동조건 대비 % (절대값+삼각형은 표시 시 가공)
 - `totalOrders` (number) — 취소·환불 포함 전체 건수
 - `statusCounts` (object) — 5상태별 건수
@@ -314,6 +316,7 @@ frontend 사이클(M3-12 본 작업)이 흡수해야 할 항목:
 6. **상품 전수 fetch 비용.** 진입 시 `fetchAllProducts`로 페이지네이션 1000씩 끝까지 끌어오고 `productsMap` 메모리 적재(line 374-384). 신상품 등록이 폭증하지 않는 한 부담 없는 규모(연 800건 운영). 단, 신규 환경에서 products가 수만 건이 된다면 N+1 위험. 부채 후보로 기록.
 
 ## 변경 이력
+- 2026-11-04 **이벤트 결제수단(바우처) 반영 (A13 §⑨, frontend-engineer).** Row 1 검사·도서·도구 카드 금액 = 카드 결제액(버킷 − 버킷 바우처), 노출 조건은 총 매출 버킷 > 0 유지. 바우처 합계 > 0이면 "{용어} 결제" 카드(`VoucherIcon`/`accent.shipping`) 1장 추가. `ordersQ` select에 `voucher_amount` 추가, `computeRevenueByCategory`에서 `testVoucher·bookVoucher·toolVoucher·voucher` 수신(dashboardData 적재), 용어 = `useVoucherConfig().label`. 바우처 0 학회는 글자 단위로 현행과 동일(회귀 0). 단일 소스 = `A13_VoucherEvent.md`. lint·test(458)·build 통과.
 - 2026-06-24 **매출 3버킷화 — 도구 검사에서 분리 (건우님 확정, 도구-검사 합산 정책 영구 폐지).** `computeRevenueByCategory`가 검사/도서/도구 3버킷 + 미분류(unclassified, "그 외=검사" fallback 폐지·콘솔 경고) 반환. 배송비 우선순위 검사>도구>도서 한 곳 귀속. 반환 구조에 `tool`·`toolShipping`·`unclassified` 추가, `total` 정합 유지(도구 분리 전후 total 불변 — 수동 검증 1건 560,000원 동일). 매출 카드·판매 순위 모두 0원/0건 버킷 숨김으로 1~3열 동적 분할(flex:1). 입금결의서(`depositResolution.js`)에 도구 행(11행) 추가, placeholder 삭제 루프 12~15로 +1, 양식 .xlsx 무수정. 호출처 전부 수정: DashboardPage(집계·카드·랭킹), EventDetailPage(매출 카드·FieldReportSection revenueData), EventDetailPreview(시안 mock), FieldReportSection(보고서 자동 템플릿 — 도구 매출 있을 때만 한 줄 추가). `FulfillmentPage`의 도구→검사 정규화는 출고 물류 편의로 매출 무관·무변경. `categoryColors.js` 기존 `tool` 토큰 사용(변경 불필요). lint 클린(변경 6파일 신규 위반 0). `DashboardPage.test.jsx` 여전히 `describe.skip`. (frontend-engineer)
 - 2026-06-10 **입금결의서 진입점 L2 일원화 (건우님 확정).** 헤더의 "입금결의서 내보내기" 버튼·핸들러·상태 제거 — L2 학회 상세 헤더의 입금결의서(작성자/부서 자동 채움)가 단일 진입점. 대시보드는 그 외 무변경(회귀 없음). (frontend-engineer)
 - 2026-06-02 매출 합산 구조 변경 + 입금결의서 export (건우님 승인):

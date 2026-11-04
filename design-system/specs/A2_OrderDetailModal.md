@@ -120,7 +120,9 @@
 ### 결제 정보 섹션 (Table, line 428)
 - [ ] **정가의 합** — `subtotal.toLocaleString()`원
 - [ ] **할인된 금액** — `totalDiscount.toLocaleString()`원
-- [ ] **배송비** — `shippingFee.toLocaleString()`원
+- [ ] **배송비** — `shippingFee.toLocaleString()`원. **(2026-11-04 A13) `shipping_waived`면 "면제" 표시**(조회 모드)
+- [ ] **(2026-11-04 A13) {용어} · 카드 결제** — `voucher_amount > 0`이면 "{용어} −N원" 줄 + "카드 결제 M원"(=`final_payment − voucher_amount`) 줄 추가(조회 모드). 상세·단일 진실 소스 `A13_VoucherEvent.md` §⑤
+- [ ] **(2026-11-04 A13) "이벤트 적용 수정" 버튼** — 이벤트 ON 학회 + 결제완료 + 비합배송 단건에서만 결제 정보 섹션 action에 노출 → `VoucherPaymentModal`을 수정 모드로 연다(상태 불변·알림톡 재발송 없음·면제 해제 시 `computeShipping` 복원)
 - [ ] **총 결제 금액** — `finalTotal.toLocaleString()`원 (fontWeight bold, fontSize 1.1rem)
 - [ ] 조회 모드 값 출처: `order.total_cost` / `order.discount_amount` / `order.delivery_fee` / `order.final_payment`
 - [ ] 편집 모드 값 출처: 클라이언트 재계산 (학회 할인율 + 무료배송 임계치 적용, line 125-149)
@@ -164,6 +166,7 @@
 ### 상태 변경 (편집 모드 무관 — 항상 즉시 저장)
 - [ ] 상태 Select 변경 → `handleSaveStatusOnly(newStatus)` → `supabase.from('orders').update({ status }).eq('id', order.id)` → 토스트 + `onUpdate()`
 - [ ] `status → paid` 전환 시 `is_on_site_sale=false` 면 **`sendAlimtalk(order.id)` 비동기 호출** → 결과 토스트 (성공/실패)
+- [ ] **(2026-11-04 A13) 이벤트 ON 학회 + 비합배송 + 결제대기 → 결제완료**를 고르면 즉시 저장하지 않고 `VoucherPaymentModal`을 연다(Select 값은 확정 전까지 결제대기 유지 → 취소 시 자연 복원). 합배송 자식(`onStatusChangeIntercept` 존재)은 바우처 비적용(기존 위임 경로 유지). 상세 `A13_VoucherEvent.md` §⑤
 - [ ] DB 트리거가 `status_history` 자동 누적
 
 ### 현장수령 (상품별 · A)
@@ -189,6 +192,7 @@
 - [ ] **확인 필요** — `order_items` 삭제 성공 후 `orders` 삭제 실패하면 고아 데이터. 트랜잭션 RPC로 묶을지 부채
 
 ### 연계 주문 연결
+- [ ] **(2026-11-04 A13) 이벤트 적용 주문 가드**: `voucher_amount > 0` 또는 `shipping_waived`면 "합배송 만들기" 버튼 숨김 + 안내 "이벤트가 적용된 주문은 합배송으로 묶을 수 없어요." `LinkPreviewDialog`도 baseOrder가 이벤트 적용이면 생성 차단, 후보 목록에서 이벤트 적용 주문 제외(후보 select에 `voucher_amount·shipping_waived` 미포함이라 api 보강 전까지 방어 필터로만 동작 — 아래 "핵심 발견" 참조)
 - [ ] **노출 조건**: `orders:edit` AND `!parent_order_id` (이 주문이 아직 child가 아닐 때만)
 - [ ] 검색: `searchOrdersForLinking(term, excludeOrderId)` — `customer_name` 또는 `phone_number` ilike, parent_order_id null인 후보만, 최대 10건, 자기 자신 제외
 - [ ] 연결: `linkOrders(parent.id, this.id)` — RPC 아니라 클라이언트 트랜잭션:
@@ -298,6 +302,8 @@
 
 5. **상태 셀이 편집 모드와 별개로 항상 활성.** 다른 필드는 “편집” 토글이 필요한데 상태만 그렇지 않다(line 382 안의 Select). 운영상 빠른 paid 전환을 위한 의도지만, “편집 모드 아닐 때 실수로 상태가 바뀌는” 사고 가능성. 시안에서 명시적 confirm 도입할지 결정 필요.
 
+6. **(2026-11-04 A13) 합배송 후보 select에 이벤트 적용 컬럼 미포함 부채.** `getLinkableOrdersByEvent`·`searchOrdersForLinking`(`api/orders.js`)은 명시 컬럼만 select하고 `voucher_amount·shipping_waived`를 포함하지 않는다. `LinkPreviewDialog`의 후보 제외 필터는 두 컬럼을 참조하므로, api가 두 컬럼을 추가하기 전까지는 **이벤트 적용 주문이 다른 주문의 합배송 후보로 노출될 수 있다**(base 주문 쪽은 상세 모달·다이얼로그에서 이미 차단). frontend 담당 파일 외(api/orders.js)라 미수정 — api 두 select에 `voucher_amount, shipping_waived` 추가 필요(backend-engineer).
+
 ## 시안 부재로 인한 결정 사항
 
 시안이 없으므로 다음을 “이 시트의 결정”으로 박는다:
@@ -337,6 +343,7 @@
 - [ ] 시안: `src/components/PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`) — 단계 ③(준비중 상세: PIN·준비 상태 줄·상품 담기), ④(고객 제출 → 결제대기 전환 + "결제 준비 완료" 토스트·알림음 + 함께 확인·카드 결제).
 
 ## 변경 이력
+- 2026-11-04 이벤트(바우처·배송비 면제) 결제 처리 — 주문 상세(A13 §⑤, frontend-engineer) — (1) 상태 Select에서 **이벤트 ON·비합배송·결제대기→결제완료** 선택 시 `VoucherPaymentModal`(신규) 가로채기(취소 시 선택 자연 복원). (2) 결제 정보 금액 영역에 `voucher_amount>0`이면 "{용어} −N원"·"카드 결제 M원", `shipping_waived`면 배송비 "면제" 표시. (3) **"이벤트 적용 수정"** 버튼(이벤트 ON+결제완료+비합배송) → 수정 모드 모달(`.eq('status','paid')`·알림톡 재발송 없음·면제 해제 시 `computeShipping` 복원). (4) 상품 저장·주문 성격 전환 시 `shipping_waived`면 배송비 0 유지, 재계산 `final_payment < voucher_amount`면 저장 차단. (5) 합배송 연계 가드(위 "연계 주문 연결" 참조). 금액·검증·payload는 `utils/voucherPayment.js` 순수 함수(테스트 9건). 단일 진실 소스 `A13_VoucherEvent.md`. 검증: 전체 vitest 471 pass·2 skip, lint 신규 0, build OK.
 - 2026-10-19 "카드 결제 진행" 버튼 제거(건우님 결정, frontend-engineer) — PIN 주문 결제대기 주문에 보이던 "카드 결제 진행" 버튼을 제외. 결제는 기존 상태 Select(결제대기 → 결제완료)로 처리한다. 안내 박스는 유지하되 문구를 "…결제하고, 위 상태를 결제완료로 바꿔 주세요."로 조정. `CreditCardIcon` import 정리. 토스트 문구는 불변. 검증: lint 신규 0, vitest 통과, build OK.
 - 2026-10-19 준비중(PIN 주문) 상세 — 2차 보완(frontend-engineer, 메인 Claude 검수) — **(1) 결제대기 전환 누락 수정(핵심):** 상세 창이 열린 채 고객이 상품 없이 배송지를 먼저 제출하면 로컬 `customer_name`이 null이라 승격이 누락되던 결함을, `handleSaveItems`에서 금액 UPDATE 뒤 **DB 기준 조건부 UPDATE(.eq('status','preparing')·고객명 존재)로 판정**하도록 교체(돌아온 고객 필드 로컬 병합). **(2) PIN 반납:** 두 승격 경로 모두 `match_code:null` 동봉. **(3) 상세 실시간 구독:** 준비중 주문 id의 UPDATE 구독으로 고객 필드·상태·PIN 즉시 반영(편집 중 상품/입력 보호, 채널 id별 고유·정리). **(4) "결제 준비 완료"+"카드 결제 진행" 버튼 복원(룰 D 생략 철회):** status_history에 preparing 이력 있는 pending 주문에만 노출, 기존 `handleStatusSelect('paid')` 재사용. 준비중 안내 박스도 추가. 검증: lint 신규 0, vitest(pinOrder 20건) 통과, build OK.
 - 2026-10-19 준비중(PIN 주문) 상세 — 실 페이지 구현 완료(frontend-engineer) — `OrderSections.jsx`에 준비중 상세 반영: 상태 행 = 준비중 뱃지 + `PinChip`(order.match_code) + 취소 텍스트 버튼(canEdit), "준비 상태" 카드(`ReadinessRow` — 상품 n종/고객 정보 ○✕), 주문자 섹션 빈 상태(EmptyState)·배송지 빈 상태 문구(둘 다 편집은 유지 — 담당자 직접 입력 가능). 결제대기 자동 전환: `shouldPromoteToPending({status,itemCount,customerName})` 순수 판정을 `handleSaveItems`(금액 4필드 UPDATE에 status 동봉)·`handleSaveCustomer`(고객 UPDATE에 status 동봉) 두 곳에 적용, `status_history`는 트리거(trg_status_history) 담당이라 프론트 미기록. 전환 시 "결제 준비 완료" 토스트 + `playBeep` + `onLocalPromote`(목록 중복 알림 억제). 상품 담기 = 기존 items 편집 → `ProductPickerDialog` 경로 재사용. `OrderDetailModal`은 `onLocalPromote` pass-through 1줄만. 검증: lint 신규 0, vitest 통과, build OK.

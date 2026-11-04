@@ -2,7 +2,8 @@
 
 > 이 시트는 설정 화면의 정보·기능·데이터 구조의 단일 진실 소스다.
 > 시안과 실서비스 구현은 이 시트의 모든 항목을 1:1로 반영해야 한다.
-> 마지막 갱신: 2026-06-29 **동적 배지 기능 폐기 — 소분류는 유지**(건우님 결정). 본 화면 안내 Alert를 "소분류는 상품 관리 화면에서 관리합니다"로 수정(배지 문구 제거). 소분류 마스터 단일 진실 소스 UI는 A6.
+> 마지막 갱신: 2026-11-04 **"이벤트 결제수단" 섹션 신설 구현**(frontend-engineer, 단일 진실 소스 `A13_VoucherEvent.md` §①). `SettingsPage.jsx`에 SectionCard "이벤트 결제수단"(배송비 정책 블록 아래) 추가 — 용어(1~10자)·숫자 버튼(칩+입력, 1~99 정수·중복 불가·최소 1)·단위 버튼(라벨 1~4자+금액 양의 정수 행, 최소 1)·결제완료 창 미리보기. 저장은 기존 "저장하기" 버튼에 합류(`site_settings.voucher_config` jsonb, `normalizeVoucherConfig`로 정리 후 저장). 컬럼 미적용 환경 PGRST204 graceful — 오류 메시지가 가리키는 키(`voucher_config`·`free_shipping_basis`)만 빼고 재시도(while 루프로 확장). 로드 시 `normalizeVoucherConfig(data.voucher_config)`로 초기화(NULL·미적용이면 기본값). 검증 실패 시 저장 버튼 비활성+필드 하단 오류 문구. 장식용 색 인디케이터·그라데이션 없음(CLAUDE.md E). 검증: vitest 471 passed·lint 신규 0·build 성공.
+> 이전 갱신: 2026-06-29 **동적 배지 기능 폐기 — 소분류는 유지**(건우님 결정). 본 화면 안내 Alert를 "소분류는 상품 관리 화면에서 관리합니다"로 수정(배지 문구 제거). 소분류 마스터 단일 진실 소스 UI는 A6.
 > 이전 갱신: 2026-06-29 **소분류·배지 마스터 CRUD를 상품 관리(A6)로 이동 — 본 화면에서 블록 4·5 제거**(건우님 확정 #1). SettingsPage에는 안내 Alert 1줄만 잔존. 마스터 단일 진실 소스 UI는 이제 A6.
 
 ## 참조 파일
@@ -11,6 +12,7 @@
 - 연계 화면: `inpsyt-order-frontend/src/components/GoRedirect.jsx` (`/go` 진입 시 `active_event_slug` 사용)
 - 외부 라이브러리: `qrcode` (QR 생성)
 - DB 스키마: `supabase/migrations/20260401000000_patch_rls_and_create_site_settings.sql` (`site_settings`)
+- 이벤트 결제수단("이벤트 결제수단" 섹션): **`A13_VoucherEvent.md` §①**(단일 진실 소스). `site_settings.voucher_config`(jsonb) + 유틸 `src/utils/voucherConfig.js`(`normalizeVoucherConfig`·`DEFAULT_VOUCHER_CONFIG`).
 - **(2026-06-29 이동) 소분류 마스터 CRUD는 A6 상품 관리 화면 소관** — 건우님 확정으로 SettingsPage→ProductManagementPage 헤더 액션부로 이동. 마스터 단일 진실 소스 UI·데이터 모델(`subcategories`)·다이얼로그·삭제 가드·색 프리셋은 이제 `A6_ProductManagementPage.md` 참조. 본 화면에는 안내 1줄만 잔존. API `src/api/masters.js`. **(2026-06-29) 동적 배지(`badges`)는 폐기** — 코드·UI 모두 제거.
 
 ## 사용자 시나리오
@@ -164,6 +166,8 @@ master 권한자가 학회 직전 한 번 들어와 (1) 이번 학회의 `/go` �
 8~11. **(P1) 마스터 CRUD 관련 핵심 발견(저장 흐름 분리·삭제 가드·색 프리셋·소분류 노출 전용)은 A6 상품 관리로 이동.** `A6_ProductManagementPage.md` §발견·§소분류 마스터 관리 패널 참조. 규칙 자체는 A6에서 동일하게 유지된다. **배지 관련 발견은 폐기**(2026-06-29 동적 배지 기능 제거).
 
 ## 변경 이력
+- 2026-11-04 "배송비 정책" 섹션 맨 아래에 Switch "이벤트 결제 시 배송비 면제 사용"(기본 꺼짐) 추가. 저장은 `voucher_config.shippingWaiverEnabled`(마이그레이션 불필요). 상세 A13 §①.
+- 2026-11-04 이벤트 결제수단 "숫자 버튼" **최대 5개**(5개면 입력·추가 비활성), 미리보기 배치를 결제완료 창과 동일하게(숫자 5칸 고정·단위 균등 분할). 상세 A13 §①.
 - 2026-06-29 **동적 배지 기능 폐기 — 소분류는 유지** (실 코드 변경, 건우님 결정). 본 화면 안내 Alert 문구를 "소분류는 상품 관리 화면(상단 '소분류 관리')에서 관리합니다"로 수정(배지 언급 제거). `badges` 테이블·`products.badges`·배지 데이터 모델·블록 4·5의 배지 잔존 표현 정리. 소분류 마스터·안내 Alert 자체는 유지. 코드 변경은 SettingsPage 안내 문구 1줄. 배지 마스터 CRUD API·UI는 이미 A6로 이동된 상태에서 A6에서 제거됨(본 화면 영향 없음).
 - 2026-06-29 **소분류·배지 마스터 CRUD를 상품 관리(A6)로 이동 — 본 화면에서 제거** (건우님 확정 #1). SettingsPage에서 블록 4(소분류)·블록 5(배지) SectionCard 2개·다이얼로그 2개·관련 state(`subcategories`/`badges`/`usage`/`subDialog`/`badgeDialog`/`masterSaving`)·핸들러(`loadMasters`/`handleSaveSub`/`handleDeleteSub`/`handleToggleSubActive`/배지 동형)·import(masters API·`ColorPresetPicker`/`SoftChip` 로컬 컴포넌트·`MASTER_COLOR_PRESETS`)를 전량 제거. 대신 **안내 Alert 1줄** "소분류·배지는 상품 관리 화면(상단 '소분류·배지 관리')에서 관리합니다"(시스템 정보 블록 아래). API `masters.js`는 ProductManagementPage가 import하여 그대로 사용(API 변경 0). 마스터 단일 진실 소스 UI = A6. 배치 이유: 상품 진열 준비 작업이 상품 관리 맥락에 더 자연스럽고, 엑셀 양식·업로드와 같은 화면에서 일괄 처리 가능(건우님 결정). 데이터 모델·핵심 발견 8~11·입력 폼·액션 절 모두 A6 참조로 정리.
 - 2026-06-29 **소분류·배지 마스터 CRUD 실 코드 구현** (P1). (이후 위 항목으로 상품 관리에 이동됨) (1) **API 신설** `src/api/masters.js` — `fetchSubcategories`/`createSubcategory`/`updateSubcategory`/`deleteSubcategory`, `fetchBadges`/`createBadge`/`updateBadge`/`deleteBadge`, `fetchMasterUsageCounts`(상품 전수 집계 → 이름별 사용수). 테이블 미존재(마이그레이션 미적용) 시 빈 배열 graceful 폴백, products.badges 컬럼 미존재도 폴백. (2) **SettingsPage** — 시스템 정보 블록 뒤에 블록 4(소분류 관리)·블록 5(배지 관리) SectionCard 추가. 각 SectionCard `action`에 추가 버튼, 목록은 행 단위(소프트 틴트 칩·소속/순서·사용수·is_active Switch·편집/삭제 아이콘), 빈 상태 메시지, 사용 중(>0) 삭제 차단(아이콘 disabled + 경고 토스트). (3) **다이얼로그 2개** — 소분류(이름·소속 대분류 Select·색 프리셋·정렬순서 4필드 + 미리보기), 배지(이름·색 프리셋·우선순위 3필드 + 미리보기). 같은 대분류 내 소분류명 중복·배지명 전역 중복 검증. (4) **색 프리셋** `MASTER_COLOR_PRESETS`(9색, AA 통과 theme 토큰 계열) `constants/categoryColors.js`에 추가 — 자유 hex 금지(§발견 10). 견본 원형 클릭 선택. (5) **즉시 저장** — 다이얼로그 저장/삭제/Switch 모두 즉시 DB 반영, 하단 "저장하기"는 site_settings 전용임을 블록 상단 안내 Alert로 명시(§발견 8). (6) 배지 블록에 "인기·신상품·할인은 상품별 체크박스로 별도 관리" 안내(§블록5 참고 안내). theme.js 무수정, 마이그레이션 `20260625000000`/`20260625010000`/`20260619000000`(badges 컬럼) 적용 후 실동작. **C1 고객 카드 배지 칩 표시는 별도 트랙(미구현).**

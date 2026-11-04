@@ -32,6 +32,7 @@ import {
 import { supabase } from '../supabaseClient';
 import { useFormDraft } from '../hooks/useFormDraft';
 import { useNotification } from '../hooks/useNotification';
+import { useVoucherConfig } from '../hooks/useVoucherConfig';
 import { copyToClipboard } from '../utils/eventUrl';
 import { buildSalesBlock, replaceSalesBlock, dayDateLabel } from '../utils/eventDaySales';
 import { DraftBanner, DraftSavedHint } from './ui';
@@ -64,6 +65,7 @@ const FieldReportSection = ({
 }) => {
   const theme = useTheme();
   const { addNotification } = useNotification();
+  const { label: voucherLabel } = useVoucherConfig();
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false); // 신규 작성(상단 입력칸)
@@ -133,7 +135,7 @@ const FieldReportSection = ({
   // "0. 판매" 블록 — 일차별 props 있으면 누적+일차, 없으면 누적만(현행 revenueData).
   const buildSales = useCallback((day) => {
     if (canPerDaySales) {
-      return buildSalesBlock({ orders, dayNumber: day, startDate: eventStartDate, endDate: eventEndDate, productsMap });
+      return buildSalesBlock({ orders, dayNumber: day, startDate: eventStartDate, endDate: eventEndDate, productsMap, voucherLabel });
     }
     const testRev = (revenueData?.testRevenue || 0).toLocaleString();
     const bookRev = (revenueData?.bookRevenue || 0).toLocaleString();
@@ -145,7 +147,7 @@ const FieldReportSection = ({
       ? `\n도구 판매: ${toolRevNum.toLocaleString()}원 (배송비 ${(revenueData?.toolShipping || 0).toLocaleString()}원 포함)`
       : '';
     return `0. 판매\n검사 판매: ${testRev}원 (배송비 ${testShip}원 포함)\n도서 판매: ${bookRev}원 (배송비 ${bookShip}원 포함)${toolLine}\n합계: ${totalRev}원`;
-  }, [canPerDaySales, orders, eventStartDate, eventEndDate, productsMap, revenueData]);
+  }, [canPerDaySales, orders, eventStartDate, eventEndDate, productsMap, revenueData, voucherLabel]);
 
   const buildTemplate = useCallback((day) => (
     `${eventName || '전체'} 현장마케팅 보고드립니다.\n\n${buildSales(day)}\n\n1. 도서 관련\n\n2. 검사 관련\n\n이상 현장마케팅 마무리하겠습니다.`
