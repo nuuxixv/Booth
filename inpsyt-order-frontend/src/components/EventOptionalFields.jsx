@@ -14,6 +14,7 @@ import { copyToClipboard } from '../utils/eventUrl';
 import { useNotification } from '../hooks/useNotification';
 import { VISIBLE_CATEGORY_OPTIONS, rateToPercent, percentToRate } from '../utils/eventForm';
 import { useVoucherConfig } from '../hooks/useVoucherConfig';
+import { withObjectParticle } from '../utils/voucherConfig';
 
 /**
  * 행사 선택 8그룹(판매대분류·할인율·설치/철거 시간·장소 3분리·참가비용·참석자·비고) — 생성 페이지·L2 편집 공용.
@@ -29,7 +30,7 @@ import { useVoucherConfig } from '../hooks/useVoucherConfig';
 const EventOptionalFields = ({ form, onChange, staff = [], categoryCounts }) => {
   const theme = useTheme();
   const { addNotification } = useNotification();
-  const voucherLabel = useVoucherConfig().label; // 이벤트 결제수단 용어(설정 탭 지정) — 보조 문구용.
+  const { label: voucherLabel, shippingWaiverEnabled } = useVoucherConfig(); // 설정 탭 지정값 — 보조 문구용.
   const [postcodeOpen, setPostcodeOpen] = useState(false);
   const cats = form?.visible_categories || [];
   const costNum = form?.marketing_cost ? Number(form.marketing_cost) : 0;
@@ -137,7 +138,7 @@ const EventOptionalFields = ({ form, onChange, staff = [], categoryCounts }) => 
             label={<Typography variant="body2" sx={{ fontWeight: 600 }}>이벤트 적용</Typography>}
           />
           <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
-            켜면 결제완료 처리 때 {voucherLabel}·배송비 면제를 적용하는 창이 뜹니다.
+            켜면 결제완료 처리 때 {shippingWaiverEnabled ? `${voucherLabel}·배송비 면제를` : withObjectParticle(voucherLabel)} 적용하는 창이 뜹니다.
           </Typography>
         </Box>
       </Box>

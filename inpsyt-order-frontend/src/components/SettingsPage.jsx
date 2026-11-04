@@ -18,6 +18,7 @@ import {
   RadioGroup,
   Radio,
   InputLabel,
+  Switch,
   useTheme,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
@@ -479,6 +480,24 @@ const SettingsPage = () => {
               변경 즉시 새 주문부터 적용됩니다. 기존 주문의 배송비는 바뀌지 않습니다.
             </Typography>
           </FormControl>
+
+          <Divider sx={{ my: 0.5 }} />
+
+          {/* 이벤트 결제 시 배송비 면제 노출 — 저장은 voucher_config.shippingWaiverEnabled(A13 §①). 기본 꺼짐. */}
+          <Box>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={voucherConfig.shippingWaiverEnabled}
+                  onChange={(e) => setVoucherConfig({ ...voucherConfig, shippingWaiverEnabled: e.target.checked })}
+                />
+              }
+              label={<Typography variant="subtitle2">이벤트 결제 시 배송비 면제 사용</Typography>}
+            />
+            <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', pl: 5.75 }}>
+              켜면 이벤트 적용 학회의 결제완료 창에 배송비 면제 스위치가 보입니다.
+            </Typography>
+          </Box>
         </Box>
       </SectionCard>
 

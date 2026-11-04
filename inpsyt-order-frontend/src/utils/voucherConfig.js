@@ -11,6 +11,8 @@ export const DEFAULT_VOUCHER_CONFIG = Object.freeze({
     { label: '천', value: 1000 },
     { label: '백', value: 100 },
   ],
+  // 결제완료 창에 배송비 면제 스위치를 보일지 — 설정 탭 "배송비 정책"에서 켬. 기본 꺼짐(2026-11-04 건우님 결정).
+  shippingWaiverEnabled: false,
 });
 
 // 숫자 버튼 최대 개수 — 결제완료 창이 숫자 줄을 5칸 고정 너비로 그린다(2026-11-04 건우님 피드백).
@@ -21,7 +23,7 @@ const isPositiveInt = (n) => Number.isInteger(n) && n > 0;
 /**
  * 저장값 → 화면에서 쓰는 설정. 잘못된 항목은 걸러내고, 비면 기본값.
  * @param {object|null} raw site_settings.voucher_config
- * @returns {{ label: string, digits: number[], units: Array<{label: string, value: number}> }}
+ * @returns {{ label: string, digits: number[], units: Array<{label: string, value: number}>, shippingWaiverEnabled: boolean }}
  */
 export function normalizeVoucherConfig(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
@@ -46,6 +48,7 @@ export function normalizeVoucherConfig(raw) {
     label,
     digits: digits.length ? digits : [...DEFAULT_VOUCHER_CONFIG.digits],
     units: units.length ? units : DEFAULT_VOUCHER_CONFIG.units.map((u) => ({ ...u })),
+    shippingWaiverEnabled: src.shippingWaiverEnabled === true,
   };
 }
 

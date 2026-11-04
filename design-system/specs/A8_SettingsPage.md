@@ -166,6 +166,7 @@ master 권한자가 학회 직전 한 번 들어와 (1) 이번 학회의 `/go` �
 8~11. **(P1) 마스터 CRUD 관련 핵심 발견(저장 흐름 분리·삭제 가드·색 프리셋·소분류 노출 전용)은 A6 상품 관리로 이동.** `A6_ProductManagementPage.md` §발견·§소분류 마스터 관리 패널 참조. 규칙 자체는 A6에서 동일하게 유지된다. **배지 관련 발견은 폐기**(2026-06-29 동적 배지 기능 제거).
 
 ## 변경 이력
+- 2026-11-04 "배송비 정책" 섹션 맨 아래에 Switch "이벤트 결제 시 배송비 면제 사용"(기본 꺼짐) 추가. 저장은 `voucher_config.shippingWaiverEnabled`(마이그레이션 불필요). 상세 A13 §①.
 - 2026-11-04 이벤트 결제수단 "숫자 버튼" **최대 5개**(5개면 입력·추가 비활성), 미리보기 배치를 결제완료 창과 동일하게(숫자 5칸 고정·단위 균등 분할). 상세 A13 §①.
 - 2026-06-29 **동적 배지 기능 폐기 — 소분류는 유지** (실 코드 변경, 건우님 결정). 본 화면 안내 Alert 문구를 "소분류는 상품 관리 화면(상단 '소분류 관리')에서 관리합니다"로 수정(배지 언급 제거). `badges` 테이블·`products.badges`·배지 데이터 모델·블록 4·5의 배지 잔존 표현 정리. 소분류 마스터·안내 Alert 자체는 유지. 코드 변경은 SettingsPage 안내 문구 1줄. 배지 마스터 CRUD API·UI는 이미 A6로 이동된 상태에서 A6에서 제거됨(본 화면 영향 없음).
 - 2026-06-29 **소분류·배지 마스터 CRUD를 상품 관리(A6)로 이동 — 본 화면에서 제거** (건우님 확정 #1). SettingsPage에서 블록 4(소분류)·블록 5(배지) SectionCard 2개·다이얼로그 2개·관련 state(`subcategories`/`badges`/`usage`/`subDialog`/`badgeDialog`/`masterSaving`)·핸들러(`loadMasters`/`handleSaveSub`/`handleDeleteSub`/`handleToggleSubActive`/배지 동형)·import(masters API·`ColorPresetPicker`/`SoftChip` 로컬 컴포넌트·`MASTER_COLOR_PRESETS`)를 전량 제거. 대신 **안내 Alert 1줄** "소분류·배지는 상품 관리 화면(상단 '소분류·배지 관리')에서 관리합니다"(시스템 정보 블록 아래). API `masters.js`는 ProductManagementPage가 import하여 그대로 사용(API 변경 0). 마스터 단일 진실 소스 UI = A6. 배치 이유: 상품 진열 준비 작업이 상품 관리 맥락에 더 자연스럽고, 엑셀 양식·업로드와 같은 화면에서 일괄 처리 가능(건우님 결정). 데이터 모델·핵심 발견 8~11·입력 폼·액션 절 모두 A6 참조로 정리.

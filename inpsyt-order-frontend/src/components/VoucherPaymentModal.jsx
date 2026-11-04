@@ -32,7 +32,7 @@ import {
 // 소제목 줄 — 왼쪽 소제목, 오른쪽 금액(또는 컨트롤). 세 소제목이 같은 위계를 갖도록 한 곳에서 그린다.
 const SectionHeader = ({ title, amount, sx }) => (
   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, minHeight: 32, ...sx }}>
-    <Typography variant="subtitle2">{title}</Typography>
+    {typeof title === 'string' ? <Typography variant="subtitle2">{title}</Typography> : title}
     {typeof amount === 'string' ? (
       <Typography variant="body2" sx={{ fontFeatureSettings: '"tnum" 1', whiteSpace: 'nowrap' }}>{amount}</Typography>
     ) : amount}
@@ -86,6 +86,7 @@ const VoucherPaymentModal = ({ open, onClose, order, config, settings, mode = 'c
   });
   const valid = isVoucherWithinLimit({ payableBeforeVoucher, voucherSum });
   const waiveDisabled = fullDeliveryFee === 0;
+  const showWaiver = Boolean(config.shippingWaiverEnabled) || (mode === 'edit' && Boolean(order.shipping_waived));
 
   const handleAddUnit = (unit) => {
     setEntries((prev) => appendVoucherEntry(prev, selectedDigit, unit));
@@ -166,27 +167,29 @@ const VoucherPaymentModal = ({ open, onClose, order, config, settings, mode = 'c
           )}
         </Box>
 
-        {/* 배송비 면제 — 소제목 줄에 스위치. 켜면 차감액, 배송비가 없으면 비활성 + 안내. */}
-        <SectionHeader
-          title="배송비 면제"
-          sx={{ mt: 2.5 }}
-          amount={
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              {waiveDisabled ? (
+        {/* 배송비 면제 — 스위치는 줄 왼쪽, 금액은 다른 소제목처럼 오른쪽 끝(2026-11-04 건우님 피드백).
+            설정(shippingWaiverEnabled)이 꺼져 있으면 숨김. 이미 면제된 주문의 수정 창은 풀 수 있게 항상 보인다. */}
+        {showWaiver && (
+          <SectionHeader
+            sx={{ mt: 2.5 }}
+            title={
+              <Box component="label" sx={{ display: 'flex', alignItems: 'center', ml: -1.5, cursor: waiveDisabled ? 'default' : 'pointer' }}>
+                <Switch
+                  checked={shippingWaived}
+                  onChange={(e) => setShippingWaived(e.target.checked)}
+                  disabled={waiveDisabled}
+                  inputProps={{ 'aria-label': '배송비 면제' }}
+                />
+                <Typography variant="subtitle2" color={waiveDisabled ? 'text.disabled' : 'text.primary'}>배송비 면제</Typography>
+              </Box>
+            }
+            amount={
+              waiveDisabled ? (
                 <Typography variant="caption" color="text.secondary">배송비 없음</Typography>
-              ) : shippingWaived && (
-                <Typography variant="body2" sx={amountSx}>−{waived.toLocaleString()}원</Typography>
-              )}
-              <Switch
-                checked={shippingWaived}
-                onChange={(e) => setShippingWaived(e.target.checked)}
-                disabled={waiveDisabled}
-                inputProps={{ 'aria-label': '배송비 면제' }}
-                sx={{ mr: -1 }}
-              />
-            </Box>
-          }
-        />
+              ) : shippingWaived ? `−${waived.toLocaleString()}원` : null
+            }
+          />
+        )}
 
         {/* 최종 — 단말기에 찍을 금액. 소제목보다 한 단계 큰 위계. */}
         <Divider sx={{ mt: 2, mb: 1.5 }} />

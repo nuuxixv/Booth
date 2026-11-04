@@ -45,6 +45,12 @@ describe('normalizeVoucherConfig', () => {
     expect(normalizeVoucherConfig({ units: [] }).units).toEqual(DEFAULT_VOUCHER_CONFIG.units);
   });
 
+  it('shippingWaiverEnabled — true일 때만 켜짐, 기본 꺼짐', () => {
+    expect(normalizeVoucherConfig(null).shippingWaiverEnabled).toBe(false);
+    expect(normalizeVoucherConfig({ shippingWaiverEnabled: true }).shippingWaiverEnabled).toBe(true);
+    expect(normalizeVoucherConfig({ shippingWaiverEnabled: 'true' }).shippingWaiverEnabled).toBe(false);
+  });
+
   it('숫자 버튼은 최대 5개(오름차순 앞 5개)', () => {
     expect(normalizeVoucherConfig({ digits: [7, 1, 2, 3, 4, 5, 6] }).digits).toEqual([1, 2, 3, 4, 5]);
   });
