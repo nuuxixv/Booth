@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   Box, Typography, TextField, Chip, Autocomplete, Checkbox, ListItemText, InputAdornment,
-  Button, Modal, useTheme,
+  Button, Modal, Switch, FormControlLabel, useTheme,
 } from '@mui/material';
 import {
   PlaceOutlined as PlaceIcon,
@@ -13,6 +13,7 @@ import { numberToKoreanCurrency } from '../utils/koreanCurrency';
 import { copyToClipboard } from '../utils/eventUrl';
 import { useNotification } from '../hooks/useNotification';
 import { VISIBLE_CATEGORY_OPTIONS, rateToPercent, percentToRate } from '../utils/eventForm';
+import { useVoucherConfig } from '../hooks/useVoucherConfig';
 
 /**
  * 행사 선택 8그룹(판매대분류·할인율·설치/철거 시간·장소 3분리·참가비용·참석자·비고) — 생성 페이지·L2 편집 공용.
@@ -28,6 +29,7 @@ import { VISIBLE_CATEGORY_OPTIONS, rateToPercent, percentToRate } from '../utils
 const EventOptionalFields = ({ form, onChange, staff = [], categoryCounts }) => {
   const theme = useTheme();
   const { addNotification } = useNotification();
+  const voucherLabel = useVoucherConfig().label; // 이벤트 결제수단 용어(설정 탭 지정) — 보조 문구용.
   const [postcodeOpen, setPostcodeOpen] = useState(false);
   const cats = form?.visible_categories || [];
   const costNum = form?.marketing_cost ? Number(form.marketing_cost) : 0;
@@ -111,16 +113,33 @@ const EventOptionalFields = ({ form, onChange, staff = [], categoryCounts }) => 
           )}
         </Box>
 
-        <TextField
-          label="할인율 (%)"
-          type="number"
-          fullWidth
-          value={rateToPercent(form?.discount_rate)}
-          onChange={(e) => onChange('discount_rate', percentToRate(e.target.value))}
-          inputProps={{ step: '1', min: '0', max: '100' }}
-          InputLabelProps={{ shrink: true }}
-          helperText="예: 15 = 15% 할인"
-        />
+        <Box>
+          <TextField
+            label="할인율 (%)"
+            type="number"
+            fullWidth
+            value={rateToPercent(form?.discount_rate)}
+            onChange={(e) => onChange('discount_rate', percentToRate(e.target.value))}
+            inputProps={{ step: '1', min: '0', max: '100' }}
+            InputLabelProps={{ shrink: true }}
+            helperText="예: 15 = 15% 할인"
+          />
+
+          {/* 이벤트 적용 — 켜면 결제완료 처리 때 바우처·배송비 면제 창(A13). */}
+          <FormControlLabel
+            sx={{ mt: 1.5, ml: 0 }}
+            control={(
+              <Switch
+                checked={!!form?.voucher_enabled}
+                onChange={(e) => onChange('voucher_enabled', e.target.checked)}
+              />
+            )}
+            label={<Typography variant="body2" sx={{ fontWeight: 600 }}>이벤트 적용</Typography>}
+          />
+          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+            켜면 결제완료 처리 때 {voucherLabel}·배송비 면제를 적용하는 창이 뜹니다.
+          </Typography>
+        </Box>
       </Box>
 
       {/* 2행 — 설치 시간 · 철거 시간 (자유 텍스트, 피커 금지 — 모호 표현 수용) */}

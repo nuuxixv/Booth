@@ -2,7 +2,8 @@
 
 > 이 시트는 학회 관리 화면의 정보·기능·데이터 구조의 단일 진실 소스다.
 > 시안과 실서비스 구현은 이 시트의 모든 항목을 1:1로 반영해야 한다.
-> 마지막 갱신: 2026-06-25 판매 대분류 선택 필드 **구현**(`events.visible_categories`) — 빈 선택 의미 정정(빈/NULL=전체 노출, PRD 초기 "0개" 기각) + 실 코드 변경 반영.
+> 마지막 갱신: 2026-11-04 **이벤트 적용 토글 — A5 코드 변경 없음(포인터)**(frontend-engineer, `A13_VoucherEvent.md` §②). 이벤트 적용 토글(`events.voucher_enabled`)은 L2 상세/생성의 공용 폼 `EventOptionalFields`에만 있고, 본 목록 화면은 편집을 `EventDetailPage`로 네비게이트하는 리스트라 저장 라운드트립이 없어 `EventManagementPage.jsx` 수정 불필요. 목록 select도 `voucher_enabled` 비의존(표시 안 함). 데이터 모델·토글 상세는 A13·A11.
+> 이전 갱신: 2026-06-25 판매 대분류 선택 필드 **구현**(`events.visible_categories`) — 빈 선택 의미 정정(빈/NULL=전체 노출, PRD 초기 "0개" 기각) + 실 코드 변경 반영.
 
 ## 참조 파일
 - 실 컴포넌트: `inpsyt-order-frontend/src/components/EventManagementPage.jsx` (799줄)

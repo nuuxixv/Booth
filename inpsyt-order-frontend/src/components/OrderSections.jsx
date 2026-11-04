@@ -38,11 +38,14 @@ import { sendAlimtalk } from '../api/alimtalk';
 import { SHIPPING_DEFAULTS, calcShippingFee } from '../constants/shipping';
 import { SectionCard, StatusBadge, InfoRow, PriceBlock, EmptyState } from './ui';
 import ProductPickerDialog from './ProductPickerDialog';
+import VoucherPaymentModal from './VoucherPaymentModal';
 import { PinChip, ReadinessRow } from './PinOrderBits';
 import { formatPhone } from '../utils/formatPhone';
 import { getDiscountedUnit } from '../utils/pricing';
 import { shouldPromoteToPending } from '../utils/pinOrder';
 import { playBeep } from '../utils/playBeep';
+import { useVoucherConfig } from '../hooks/useVoucherConfig';
+import { cardAmountOf } from '../utils/voucherConfig';
 
 // 사양 시트: design-system/specs/A2_OrderDetailModal.md
 // OrderDetailModal(단일 주문)과 GroupOrderModal(껍데기 자식 토글)이 공유하는 섹션 본문.
@@ -64,9 +67,12 @@ const OrderSections = ({
 }) => {
   const theme = useTheme();
   const audioCtxRef = useRef(null);
+  const voucherConfig = useVoucherConfig();
 
   // order 로컬 미러 — 섹션 저장 후 onUpdate(부모 재조회)를 기다리지 않고 즉시 갱신.
   const [order, setOrder] = useState(orderProp);
+  // 이벤트 적용 모달(A13 §④·§⑤). mode: 'create'(결제대기→결제완료 가로채기) | 'edit'(이벤트 적용 수정)
+  const [voucherModal, setVoucherModal] = useState({ open: false, mode: 'create' });
 
   // editingSection: null | 'customer' | 'shipping' | 'memo' | 'items'
   const [editingSection, setEditingSection] = useState(null);
@@ -206,7 +212,8 @@ const OrderSections = ({
 
     const currentTotalDiscount = currentSubtotal - discountedSubtotal;
     // 배송비 판정은 설정 기반(정가/할인가), 기본 정가. 3경로 공유 함수 경유.
-    const currentShippingFee = calcShippingFee({
+    // 이벤트로 배송비를 면제한 주문은 상품을 바꿔도 배송비 0을 유지(A13 §⑤).
+    const currentShippingFee = order.shipping_waived ? 0 : calcShippingFee({
       basis: settings.free_shipping_basis,
       originalTotal: currentSubtotal,
       discountedTotal: discountedSubtotal,
@@ -377,6 +384,11 @@ const OrderSections = ({
       addNotification('연계 주문의 상품은 각 개별 주문에서 수정하세요.', 'warning');
       return;
     }
+    // 재계산된 결제 금액이 이미 받은 바우처보다 작아지면 저장 차단(A13 §⑤).
+    if ((order.voucher_amount || 0) > finalTotal) {
+      addNotification(`${voucherConfig.label} 금액보다 결제 금액이 작아져요. 이벤트 적용을 먼저 수정해 주세요.`, 'warning');
+      return;
+    }
     setSectionSaving(true);
     try {
       const currentEvent = events.find(e => e.id === order.event_id);
@@ -474,7 +486,8 @@ const OrderSections = ({
     });
   };
 
-  const nextShippingFee = computeShipping(isOnSiteSale);
+  // 이벤트로 배송비를 면제한 주문은 성격을 바꿔도 배송비 0 유지(A13 §⑤).
+  const nextShippingFee = order.shipping_waived ? 0 : computeShipping(isOnSiteSale);
   const subtotalAfterDiscount = (order.total_cost || 0) - (order.discount_amount || 0);
   const nextFinalPayment = subtotalAfterDiscount + nextShippingFee;
   const onSiteChanged = isOnSiteSale !== (order.is_on_site_sale ?? false);
@@ -531,6 +544,14 @@ const OrderSections = ({
   };
 
   const handleStatusSelect = async (newStatus) => {
+    const voucherEnabled = Boolean(events?.find((e) => e.id === order.event_id)?.voucher_enabled);
+    // 이벤트 ON 단독 주문: 결제대기 → 결제완료는 이벤트 적용 모달로 가로채기(합배송 자식 제외, A13 §⑤).
+    // Select 값(currentStatus)은 확정 전까지 그대로 둬 취소 시 자연히 되돌아간다.
+    if (!onStatusChangeIntercept && !order.parent_order_id && !order.is_group_parent
+      && newStatus === 'paid' && voucherEnabled && currentStatus === 'pending') {
+      setVoucherModal({ open: true, mode: 'create' });
+      return;
+    }
     setCurrentStatus(newStatus);
     // 그룹 대표 취소 위임 인터셉트 — 상위(GroupOrderModal)가 처리하면 자체 업데이트 스킵.
     if (onStatusChangeIntercept) {
@@ -538,6 +559,52 @@ const OrderSections = ({
       if (handled) return;
     }
     applyStatusUpdate(newStatus);
+  };
+
+  // 이벤트 적용 모달 확정 — create(결제완료)·edit(이벤트 적용 수정) 공용. 한 번의 update(A13 §④·§⑤).
+  const handleVoucherConfirm = async (payload) => {
+    const isCreate = voucherModal.mode === 'create';
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .update(isCreate ? { status: 'paid', ...payload } : payload)
+        .eq('id', order.id)
+        .eq('status', isCreate ? 'pending' : 'paid')
+        .select();
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        addNotification('다른 화면에서 이미 상태가 바뀌었어요. 목록을 새로고침합니다.', 'warning');
+        onUpdate();
+        return true;
+      }
+      if (isCreate) {
+        setOrder((prev) => ({ ...prev, ...payload, status: 'paid' }));
+        setCurrentStatus('paid');
+        addNotification('결제완료 처리했습니다.', 'success');
+        if (!order.is_on_site_sale) {
+          sendAlimtalk(order.id).then(({ success, error: alimtalkError, skipped }) => {
+            if (skipped) return;
+            const now = new Date().toISOString();
+            if (!success) {
+              addNotification(`알림톡 발송 실패 — ${alimtalkError}`, 'warning');
+              setAlimtalk((prev) => ({ ...prev, status: 'failed', attemptedAt: now, error: alimtalkError }));
+            } else {
+              addNotification('알림톡 발송 완료', 'info');
+              setAlimtalk({ status: 'sent', sentAt: now, attemptedAt: now, error: null });
+            }
+            onUpdate();
+          });
+        }
+      } else {
+        setOrder((prev) => ({ ...prev, ...payload }));
+        addNotification('이벤트 적용을 수정했습니다.', 'success');
+      }
+      onUpdate();
+      return true;
+    } catch (err) {
+      addNotification(`${isCreate ? '결제완료 처리' : '이벤트 적용 수정'} 실패: ${err.message}`, 'error');
+      return false;
+    }
   };
 
   const handleResendAlimtalk = async () => {
@@ -588,6 +655,24 @@ const OrderSections = ({
     (editedOrderItems || []).some(i => i.order_id != null && i.order_id !== order.id);
 
   const canEdit = hasPermission('orders:edit');
+
+  // 이벤트 적용(A13 §⑤) — 결제 정보 금액 줄·"이벤트 적용 수정" 버튼.
+  const voucherEnabled = Boolean(renderEvent?.voucher_enabled);
+  const voucherAmt = order.voucher_amount || 0;
+  const isVoucherEditable = canEdit && voucherEnabled && currentStatus === 'paid'
+    && !onStatusChangeIntercept && !order.parent_order_id && !order.is_group_parent;
+  const showVoucherRows = editingSection !== 'items' && voucherAmt > 0;
+  const paymentRows = [
+    { label: '정가의 합', value: subtotal },
+    { label: '할인된 금액', value: totalDiscount, muted: totalDiscount === 0 },
+    (editingSection !== 'items' && order.shipping_waived)
+      ? { label: '배송비', value: '면제', muted: true }
+      : { label: '배송비', value: shippingFee, muted: shippingFee === 0 },
+  ];
+  if (showVoucherRows) {
+    paymentRows.push({ label: voucherConfig.label, value: -voucherAmt });
+    paymentRows.push({ label: '카드 결제', value: cardAmountOf(order) });
+  }
 
   // 준비중(현장 도움 PIN) 주문 — 상태 행 PIN 재표시·준비 상태 줄·주문자/배송지 빈 상태.
   const isPreparing = currentStatus === 'preparing';
@@ -1010,13 +1095,17 @@ const OrderSections = ({
       </SectionCard>
 
       {/* 결제 정보 */}
-      <SectionCard title="결제 정보" padding={20}>
+      <SectionCard
+        title="결제 정보"
+        padding={20}
+        action={isVoucherEditable ? (
+          <Button size="small" variant="outlined" onClick={() => setVoucherModal({ open: true, mode: 'edit' })}>
+            이벤트 적용 수정
+          </Button>
+        ) : null}
+      >
         <PriceBlock
-          rows={[
-            { label: '정가의 합', value: subtotal },
-            { label: '할인된 금액', value: totalDiscount, muted: totalDiscount === 0 },
-            { label: '배송비', value: shippingFee, muted: shippingFee === 0 },
-          ]}
+          rows={paymentRows}
           totalLabel="총 결제 금액"
           totalValue={finalTotal}
           totalColor={theme.palette.primary.main}
@@ -1040,6 +1129,17 @@ const OrderSections = ({
           </Typography>
         </Box>
       )}
+
+      {/* 이벤트 적용 모달 — 결제완료 처리·이벤트 적용 수정(A13 §④·§⑤) */}
+      <VoucherPaymentModal
+        open={voucherModal.open}
+        onClose={() => setVoucherModal((v) => ({ ...v, open: false }))}
+        order={order}
+        config={voucherConfig}
+        settings={settings}
+        mode={voucherModal.mode}
+        onConfirm={handleVoucherConfirm}
+      />
 
       {/* 상품 추가 피커 — 고객 프론트 상품 선택 UX 재사용 */}
       <ProductPickerDialog

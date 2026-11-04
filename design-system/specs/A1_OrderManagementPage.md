@@ -74,7 +74,7 @@
 - [ ] “학회명” 컬럼 — `events.find(e => e.id === order.event_id)?.name`, 없으면 "N/A" — line 817
 - [ ] “총 금액” 컬럼 — `order.final_payment.toLocaleString()`원 (천 단위 콤마, 원 단위) — line 818
 - [ ] “주문일시” 컬럼 — `yyyy-MM-dd HH:mm` — line 819
-- [ ] “상태” 컬럼 — `Select`. 옵션은 **상태기계 필터**(`ALLOWED_TRANSITIONS[order.status]`, `orderStatus.js`): **허용 전이만** 노출(`pending→[paid,cancelled]`, `paid→[refunded]`). **현재 상태는 메뉴에 넣지 않고 닫힘 표시값으로만 고정**(`value="" + displayEmpty + renderValue={() => 현재상태}`) — 열면 전이 후보만, 닫으면 현재 상태 표시. completed 전이는 목록 노출 금지(출고관리 전용), pending 회귀 금지. `orders:edit` 없으면 disabled. **허용 전이가 0개인 종결(completed·cancelled·refunded)이면 Select 대신 읽기전용 `StatusBadge` 렌더**
+- [ ] “상태” 컬럼 — **(2026-11-04 A13) `Select` → 상태 배지 버튼 + `StatusChangeModal`**. 전이 가능(`ALLOWED_TRANSITIONS[order.status]` 비어 있지 않음)하고 `orders:edit`이면 배지 옆 드롭다운 캐럿 버튼, 클릭 시 상태 변경 모달(전이 후보만 버튼으로). 전이 0개인 종결·권한 없음은 읽기전용 `StatusBadge`. **이벤트 ON 학회(`events.voucher_enabled`) 단독 주문의 결제완료는 `VoucherPaymentModal`로 전환**(상태 확정은 모달에서), 그 외는 즉시 `handleStatusChange`. 상세·라우팅은 **`design-system/specs/A13_VoucherEvent.md` §③④**가 단일 진실 소스.
 - [ ] (조건부, `alimtalk_status === 'failed'`) 상태 셀 하단 “알림톡 실패” 칩 — error 토큰(`palette.error.main` alpha 채움+보더), 미발송(null)·sent는 칩 없음
 - [ ] 행 클릭 시 (체크박스·상태 셀 제외) `OrderDetailModal` 오픈 — line 815-819 onClick
 - [ ] 체크박스는 행 클릭 이벤트 stopPropagation — line 194-212
@@ -115,7 +115,7 @@
 - [ ] 신규 주문 버튼 → `NewOrderModal` 오픈 (`orders:edit` 필요)
 - [ ] 행 클릭 → `OrderDetailModal` 오픈
 - [ ] 상태 셀 Select 변경 → `orders.status` 업데이트 + `status_history` 트리거로 이력 추가 + (newStatus=paid면) `sendAlimtalk(orderId)` 비동기 호출 — line 418-436
-- [ ] **합배송 자식 행 상태 편집** — 자식 행 상태 배지가 Select로 전환(옵션=`ALLOWED_TRANSITIONS[child.status]` 전이만, 현재 상태는 닫힘 표시값으로 고정, 종결이면 읽기전용 배지). 껍데기 행은 읽기전용 종합 배지 유지. `handleGroupChildStatusChange(node, child, newStatus)`가 `classifyGroupStatusChange`로 분기:
+- [ ] **합배송 자식 행 상태 편집** — (2026-11-04 A13) 자식 행도 상태 배지 버튼 + `StatusChangeModal`(전이 후보만). **합배송 자식은 바우처 비적용** — 결제완료 선택 시 이벤트 적용 모달을 열지 않고 즉시 `handleGroupChildStatusChange`(대표 위임 보존). 이벤트 ON이면 모달 결제완료 아래 안내 "합배송 주문은 {용어}를 적용할 수 없어요. 결제완료만 처리됩니다."(A13 §③). 껍데기 행은 읽기전용 종합 배지 유지. `handleGroupChildStatusChange(node, child, newStatus)`가 `classifyGroupStatusChange`로 분기:
   - `passthrough` → 기존 `handleStatusChange(child.id, newStatus)`(paid 시 알림톡 자동발송 포함)
   - `auto`(대표 취소·환불 && 남은 활성 1건) → `reassignGroupRepresentative` 후 status update → “묶음 배송지를 자동으로 옮기고 주문을 취소했습니다.” 토스트 → 재조회
   - `pick`(남은 활성 2건+) → 페이지 레벨 `ShippingPickModal`로 새 묶음 배송지 선택. **위임 경로를 건너뛰면 그룹 배송이 깨짐** — GroupOrderModal 모달 경로와 동일 규칙(단일 소스 `utils/groupOrder.js`)
@@ -316,6 +316,7 @@ frontend가 M3 사이클에서 흡수해야 할 항목:
 - [ ] 시안: `src/components/PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`) — 단계 ⑤(주문 목록: 데스크톱 테이블 + 휴대폰 카드, 준비중 뱃지 + PIN, 체크박스 disabled, 상태 전이 취소만, 제외 캡션). 단계 ①(신규 주문 분기 진입)도 이 페이지 "+신규 주문"에서 시작.
 
 ## 변경 이력
+- 2026-11-04 이벤트(바우처·배송비 면제) 결제 처리 — 목록 상태 칸(A13 §③, frontend-engineer) — 단독 행·합배송 자식 행의 상태 `<Select>`를 **상태 배지 버튼 + `StatusChangeModal`**(신규)로 교체. 전이 0개·권한 없음은 읽기전용 배지. 합배송 자식은 기존 위임 경로(`handleGroupChildStatusChange`) 즉시 적용(바우처 비적용·이벤트 ON이면 안내 문구). **이벤트 ON 단독 주문 결제완료 → `VoucherPaymentModal`(신규, A13 §④)** 로 상태·바우처·배송비 면제를 한 번의 update로 확정. 일괄 결제완료 전환 시 이벤트 ON 주문 포함되면 "이벤트 적용 학회 주문 N건은 {용어} 없이 결제완료됩니다. 계속할까요?" 확인. paid 알림톡 자동 발송은 `sendPaidAlimtalk`로 공용화. 상세·단일 진실 소스=`A13_VoucherEvent.md`. 검증: voucherPayment.test 9건·StatusChangeModal 3건 추가, 전체 vitest 471 pass·2 skip, lint 신규 0, build OK.
 - 2026-10-19 준비중(PIN 주문) 상태 — 2차 보완(frontend-engineer, 메인 Claude 검수) — **(1) 실시간 핸들러 확장:** 준비중 id 집합에 속한 주문의 UPDATE면 **상태와 무관하게 목록 재조회**(고객이 배송지만 먼저 제출 → "작성 중"이 고객명으로 즉시 갱신). 알림·알림음은 pending 전환일 때만(본인 저장분 중복 억제 유지). **(2) 생성 후 상세 자동 오픈 보완:** 목록 필터로 새 준비중 주문이 목록에 없을 때 `getOrderById(orderId)`(신규, `api/orders.js`) 단건 조회로 상세를 연다(목록 등장 시 열기는 폴백). **(3) PIN 생성 학회 기본값 수정:** getEvents 이름순 정렬로 엉뚱한 학회가 기본값이던 문제를 `pickDefaultPinEvent`(진행 중 KST)로 교체(상세는 A2_NewOrderModal). 검증: lint 신규 0, vitest(pinOrder 20건) 통과, build OK.
 - 2026-10-19 준비중(PIN 주문) 상태 — 실 페이지 구현 완료(frontend-engineer) — `OrderManagementPage.jsx`에 준비중 행 표시(뱃지+`match_code` PIN 칩·고객명 "작성 중" muted·행 체크박스 disabled+Tooltip "준비중 주문은 일괄 변경 대상이 아니에요"·전이 취소만) 반영. "+신규 주문" 버튼이 `NewOrderBranchDialog`(PIN/수기 2택)를 먼저 열고, PIN 선택 시 `PinOrderCreateDialog`로 생성→상세 자동 오픈. 원격 제출 실시간 알림: `orders` UPDATE 구독 + 준비중 id 집합 판정(본인 저장분 중복 억제, 채널 언마운트 정리). 제외(매출·출고·합배송·일괄 변경)는 PR #79 선행분 검증. 상태 필터 드롭다운은 `STATUS_TO_KOREAN`에 preparing 포함되어 자동 노출. 검증: lint 신규 0, vitest 통과(pinOrder.test.js 9건 추가), build OK.
 - 2026-10-19 준비중(PIN 주문) 상태 확장(사양·시안 단계, product-designer) — 상태 6종째 `preparing`(준비중/#64748B) 추가(REVENUE_STATUSES 미포함, ALLOWED_TRANSITIONS.preparing=['cancelled']). 목록 준비중 뱃지 옆 PIN 재표시(제출 시 소멸), 상태 전이 취소만, 고객명 "작성 중" muted. 매출·출고·합배송·일괄 변경(체크박스 disabled+Tooltip) 제외. "+신규 주문" 분기(PIN/수기)는 A2_NewOrderModal. 시안 `PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`) 단계 ⑤. 근거 `DOCS/PRD_현장도움주문.md` §4·§6. 상태 상수 실 반영·DB는 별도 사이클.

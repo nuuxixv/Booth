@@ -54,13 +54,17 @@ export function dayDateLabel(startDate, dayNumber) {
 }
 
 // 매출 1벌 → 본문 줄들. perDay=true면 배송비 0원일 때 "(배송비 …)" 생략, 누적은 항상 표기.
-function salesLines(rev, perDay) {
+// 바우처(A13 §⑩): 버킷에 바우처가 있으면 카테고리 줄 금액 = 카드 결제액(버킷 − 버킷 바우처),
+// "합계" 위에 "{용어} 결제: N원" 줄 추가. 합계 = 총 매출(카드 + 바우처). 바우처 0이면 출력 동일.
+function salesLines(rev, perDay, voucherLabel = '바우처') {
   const ship = (s) => (perDay && !(s > 0) ? '' : ` (배송비 ${fmtWon(s)}원 포함)`);
+  const card = (bucket, voucher) => (bucket || 0) - (voucher || 0);
   const lines = [
-    `검사 판매: ${fmtWon(rev.test)}원${ship(rev.testShipping)}`,
-    `도서 판매: ${fmtWon(rev.book)}원${ship(rev.bookShipping)}`,
+    `검사 판매: ${fmtWon(card(rev.test, rev.testVoucher))}원${ship(rev.testShipping)}`,
+    `도서 판매: ${fmtWon(card(rev.book, rev.bookVoucher))}원${ship(rev.bookShipping)}`,
   ];
-  if (rev.tool > 0) lines.push(`도구 판매: ${fmtWon(rev.tool)}원${ship(rev.toolShipping)}`);
+  if (rev.tool > 0) lines.push(`도구 판매: ${fmtWon(card(rev.tool, rev.toolVoucher))}원${ship(rev.toolShipping)}`);
+  if ((rev.voucher || 0) > 0) lines.push(`${voucherLabel} 결제: ${fmtWon(rev.voucher)}원`);
   lines.push(`합계: ${fmtWon(rev.total)}원`);
   return lines;
 }
@@ -75,21 +79,22 @@ function salesLines(rev, perDay) {
  * @param {string} args.startDate - events.start_date
  * @param {string} [args.endDate] - events.end_date
  * @param {object} [args.productsMap] - 카테고리 보강용
+ * @param {string} [args.voucherLabel] - 바우처 용어(설정값, 미지정 시 "바우처"). A13 §⑩.
  * @returns {string}
  */
-export function buildSalesBlock({ orders, dayNumber, startDate, endDate, productsMap }) {
+export function buildSalesBlock({ orders, dayNumber, startDate, endDate, productsMap, voucherLabel }) {
   const n = dayNumber || 1;
   const list = orders || [];
   const dayOf = (o) => getOrderDayNumber(o, startDate, endDate);
   const opts = { productsMap };
 
   const cumRev = computeRevenueByCategory(list.filter((o) => dayOf(o) <= n), opts);
-  const out = ['0. 판매', ...salesLines(cumRev, false)];
+  const out = ['0. 판매', ...salesLines(cumRev, false, voucherLabel)];
 
   if (n >= 2) {
     for (let d = 1; d <= n; d++) {
       const rev = computeRevenueByCategory(list.filter((o) => dayOf(o) === d), opts);
-      out.push('', `(${d}) ${d}일차 (${dayDateLabel(startDate, d)})`, ...salesLines(rev, true));
+      out.push('', `(${d}) ${d}일차 (${dayDateLabel(startDate, d)})`, ...salesLines(rev, true, voucherLabel));
     }
   }
   return out.join('\n');
@@ -102,6 +107,7 @@ const SALES_HEADER = /^0\.\s*판매\s*$/;
 const SALES_LINE = [
   /^\s*$/,
   /^\s*(검사|도서|도구)\s*판매\s*:/,
+  /^\s*\S+\s*결제\s*:/, // "{용어} 결제: N원"(바우처, 용어가 바뀌어도 교체 범위 유지) — A13 §⑩
   /^\s*합계\s*:/,
   /^\s*\(\d+\)\s*\d+\s*일차/,
 ];

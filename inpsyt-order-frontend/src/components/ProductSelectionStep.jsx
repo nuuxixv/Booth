@@ -11,7 +11,7 @@ import { fetchAllProducts } from '../api/products';
 import { fetchTestGroups } from '../api/testGroups';
 import { useNotification } from '../hooks/useNotification';
 import { matchesSearch } from '../utils/search';
-import { normalizeCategory, buildGroupMetaMap, groupTestProducts, productMatchesEventTags, productMatchesSubCategory, shouldShowCategoryChips, resolvePopularFilter } from '../utils/testGroupDisplay';
+import { normalizeCategory, buildGroupMetaMap, groupTestProducts, productMatchesEventTags, productMatchesSubCategory, shouldShowCategoryChips, resolvePopularFilter, resolveViewModeChips, resolveCategoryChips } from '../utils/testGroupDisplay';
 import ProductCard from './ProductCard';
 import TestGroupCard from './TestGroupCard';
 import ProductSearchBar from './ProductSearchBar';
@@ -47,6 +47,8 @@ const ProductSelectionStep = ({ cart, onCartChange, discountRate = 0, eventTags 
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [viewMode, setViewMode] = useState('popular'); // 'all' | 'popular' | 'new'
   const [selectedCategory, setSelectedCategory] = useState('all');
+  // 사용자가 뷰 모드 칩을 직접 눌렀는지 — 누르기 전까지는 칩 자동 숨김 판정으로 기본값을 맞춘다.
+  const viewModeTouchedRef = useRef(false);
   // 검사군 펼침 상태: undefined=사용자 미조작 / true·false=사용자 조작. 검색 자동펼침은 초기 상태로만.
   const [expandedGroups, setExpandedGroups] = useState({});
 
@@ -89,6 +91,50 @@ const ProductSelectionStep = ({ cart, onCartChange, discountRate = 0, eventTags 
   // 노출 여부는 SUBCATEGORY_CHIP_CATEGORIES 화이트리스트로 결정(도구만 노출).
   // 이 플래그는 ProductCard 카테고리 배지 숨김에도 함께 쓴다.
   const isSingleCategory = visibleCategories?.length === 1;
+
+  // 카테고리 칩 후보(= "전체" 제외) — 단일 대분류는 소분류(sub_category), 그 외는 대분류(도구→검사 정규화).
+  const categories = useMemo(() => {
+    if (isSingleCategory) {
+      const hasUncategorized = baseProducts.some(p => !p.sub_category);
+      const subs = [...new Set(baseProducts.map(p => p.sub_category).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+      return hasUncategorized ? [...subs, '기타'] : subs;
+    }
+    const knownCategories = ['검사', '도서'];
+    const extractedCategories = baseProducts.map(p => normalizeCategory(p.category)).filter(Boolean);
+    return [...new Set([...knownCategories, ...extractedCategories])];
+  }, [isSingleCategory, baseProducts]);
+
+  // 칩 자동 숨김 판정(2026-11-04) — 행사 노출 상품 전체 기준 1회. 순수 함수는 testGroupDisplay.js.
+  const { showPopular, showNew, showRow: showViewModeRow } = useMemo(
+    () => resolveViewModeChips(baseProducts), [baseProducts]
+  );
+  const { keptKeys: categoryKeys, showRow: categoryHasEnough } = useMemo(
+    () => resolveCategoryChips(baseProducts, categories, isSingleCategory),
+    [baseProducts, categories, isSingleCategory]
+  );
+  // 검사·도서 단독 숨김 규칙(2026-08-18, shouldShowCategoryChips)과 AND — 둘 중 하나라도 숨기면 칩 줄 숨김.
+  const showCategoryChips = shouldShowCategoryChips(visibleCategories) && categoryHasEnough;
+
+  // 뷰 모드 기본값 동기화 — 상품이 늦게 도착해 판정이 바뀌어도, 사용자가 아직 칩을 누르지 않았으면
+  // 기본값(인기 있으면 popular, 없으면 all)을 다시 맞춘다. 눌렀더라도 선택한 칩이 숨겨졌으면
+  // 전체로 되돌린다(숨겨진 칩이 선택 상태로 남지 않게).
+  useEffect(() => {
+    setViewMode((prev) => {
+      if (!viewModeTouchedRef.current) return showPopular ? 'popular' : 'all';
+      if (prev === 'popular' && !showPopular) return 'all';
+      if (prev === 'new' && !showNew) return 'all';
+      return prev;
+    });
+  }, [showPopular, showNew]);
+
+  // 카테고리 칩이 숨겨지거나 선택한 칩이 사라지면 '전체'로 되돌린다.
+  useEffect(() => {
+    setSelectedCategory((prev) => {
+      if (!showCategoryChips) return 'all';
+      return prev === 'all' || categoryKeys.includes(prev) ? prev : 'all';
+    });
+  }, [showCategoryChips, categoryKeys]);
 
   // 검사군 마스터 맵 — is_active=false 검사군은 제외(고객 미노출).
   const groupMetaById = useMemo(() => buildGroupMetaMap(testGroupMaster), [testGroupMaster]);
@@ -274,35 +320,18 @@ const ProductSelectionStep = ({ cart, onCartChange, discountRate = 0, eventTags 
     setExpandedGroups(prev => ({ ...prev, [groupId]: !currentExpanded }));
   }, []);
 
-  let categories;
-  if (isSingleCategory) {
-    // 단일 대분류 행사 — 소분류(sub_category) 칩. 미지정 상품은 '기타'로 묶음.
-    const hasUncategorized = baseProducts.some(p => !p.sub_category);
-    const subs = [...new Set(baseProducts.map(p => p.sub_category).filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b));
-    categories = hasUncategorized ? [...subs, '기타'] : subs;
-  } else {
-    const knownCategories = ['검사', '도서'];
-    const extractedCategories = baseProducts
-      .map(p => normalizeCategory(p.category))
-      .filter(Boolean);
-    categories = [...new Set([...knownCategories, ...extractedCategories])];
-  }
-
+  // 뷰 모드 칩 — 인기·신규는 상품이 있을 때만(resolveViewModeChips). 둘 다 없으면 줄 자체를 숨김.
   const viewModes = [
     { key: 'all', label: '전체' },
-    { key: 'popular', label: '인기', icon: <StarIcon sx={{ fontSize: 14 }} /> },
-    { key: 'new', label: '신규출시', icon: <NewIcon sx={{ fontSize: 14 }} /> },
+    ...(showPopular ? [{ key: 'popular', label: '인기', icon: <StarIcon sx={{ fontSize: 14 }} /> }] : []),
+    ...(showNew ? [{ key: 'new', label: '신규출시', icon: <NewIcon sx={{ fontSize: 14 }} /> }] : []),
   ];
 
+  // 카테고리 칩 — 상품이 있는 칩만(resolveCategoryChips의 keptKeys). 노출 여부는 showCategoryChips.
   const categoryFilters = [
     { key: 'all', label: '전체' },
-    ...categories.map(cat => ({ key: cat, label: cat })),
+    ...categoryKeys.map(cat => ({ key: cat, label: cat })),
   ];
-  // 소분류 칩은 도구 단독 행사에만 노출(소분류 3종이라 잘 좁혀짐). 검사·도서 단독 행사는
-  // 숨김(칩 과다·안 좁혀짐, 이름 검색이 주 탐색). 다중 대분류는 대분류 칩 그대로.
-  // 판정은 대분류별 화이트리스트(shouldShowCategoryChips, testGroupDisplay.js).
-  const showCategoryChips = shouldShowCategoryChips(visibleCategories);
 
   const isEmpty = filteredGroups.length === 0 && displayedProducts.length === 0;
 
@@ -323,9 +352,11 @@ const ProductSelectionStep = ({ cart, onCartChange, discountRate = 0, eventTags 
       {/* Search bar — 입력 격리(로컬 state + 내부 debounce). 매 키입력에 트리 리렌더 안 됨. */}
       <ProductSearchBar onSearch={setDebouncedSearch} />
 
-      {/* Filters */}
+      {/* Filters — 뷰 모드·카테고리 칩이 모두 숨겨지면 컨테이너째 렌더하지 않는다(빈 여백 방지). */}
+      {(showViewModeRow || showCategoryChips) && (
       <Box sx={{ mb: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-        {/* View Mode */}
+        {/* View Mode — 인기·신규가 모두 없으면 줄 전체 숨김(자동 숨김). */}
+        {showViewModeRow && (
         <Box
           sx={{
             display: 'flex',
@@ -342,7 +373,7 @@ const ProductSelectionStep = ({ cart, onCartChange, discountRate = 0, eventTags 
               icon={mode.icon || undefined}
               variant={viewMode === mode.key ? 'filled' : 'outlined'}
               color={viewMode === mode.key ? 'primary' : 'default'}
-              onClick={() => setViewMode(mode.key)}
+              onClick={() => { viewModeTouchedRef.current = true; setViewMode(mode.key); }}
               sx={{
                 flexShrink: 0,
                 fontWeight: viewMode === mode.key ? 700 : 500,
@@ -354,6 +385,7 @@ const ProductSelectionStep = ({ cart, onCartChange, discountRate = 0, eventTags 
             />
           ))}
         </Box>
+        )}
 
         {/* Categories */}
         {showCategoryChips && (
@@ -387,6 +419,7 @@ const ProductSelectionStep = ({ cart, onCartChange, discountRate = 0, eventTags 
         </Box>
         )}
       </Box>
+      )}
 
       {/* PIN 확인 카드 / 재확인 안내 — 결과 목록 위에 얹힘(아래 일반 검색 결과는 그대로 렌더). */}
       {pinResult?.status === 'confirmed' && (

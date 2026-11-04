@@ -4,6 +4,8 @@ import {
   Typography,
   TextField,
   Button,
+  Chip,
+  IconButton,
   CircularProgress,
   Alert,
   InputAdornment,
@@ -28,12 +30,32 @@ import {
   Event as EventIcon,
   LocalShipping as ShippingIcon,
   WarningAmberRounded as WarningIcon,
+  Payments as PaymentsIcon,
+  Add as AddIcon,
+  Close as CloseIcon,
 } from '@mui/icons-material';
 import QRCode from 'qrcode';
 import { supabase } from '../supabaseClient';
 import { useNotification } from '../hooks/useNotification';
 import { PageHeader, SectionCard, ActionSlot, InfoRow } from './ui';
 import { sortEventsForDropdown, groupEventsForDropdown, formatEventStartDate } from '../utils/eventSort';
+import { DEFAULT_VOUCHER_CONFIG, normalizeVoucherConfig } from '../utils/voucherConfig';
+
+// 이벤트 결제수단 설정 검증(A13 §①) — 저장 가능하면 null, 아니면 오류 문구. 숫자 버튼은 추가 시
+// 이미 1~99 정수·중복 제거되므로 여기선 개수만 본다. 단위는 편집 중 빈 값이 가능해 값까지 본다.
+const validateVoucherConfig = (cfg) => {
+  const label = (cfg.label || '').trim();
+  if (label.length < 1 || label.length > 10) return '용어는 1~10자로 입력하세요.';
+  if (!cfg.digits?.length) return '숫자 버튼을 1개 이상 추가하세요.';
+  if (!cfg.units?.length) return '단위 버튼을 1개 이상 추가하세요.';
+  for (const u of cfg.units) {
+    const ul = (u.label || '').trim();
+    if (ul.length < 1 || ul.length > 4) return '단위 라벨은 1~4자로 입력하세요.';
+    const v = Number(u.value);
+    if (!Number.isInteger(v) || v <= 0) return '단위 금액은 0보다 큰 정수로 입력하세요.';
+  }
+  return null;
+};
 
 // 사양 §발견 2: 리다이렉트 베이스는 VITE_APP_URL 우선, 없으면 현재 origin.
 const APP_BASE_URL = import.meta.env?.VITE_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '');
@@ -58,6 +80,9 @@ const SettingsPage = () => {
   // 사양 §핵심 발견 1: active_event_slug 마이그레이션 누락 감지.
   // fetchSettings에서 select 결과에 컬럼이 없으면 true.
   const [activeSlugMissing, setActiveSlugMissing] = useState(false);
+  // 이벤트 결제수단(바우처) 설정(A13 §①) — NULL·컬럼 미적용이면 기본값(normalizeVoucherConfig).
+  const [voucherConfig, setVoucherConfig] = useState(() => normalizeVoucherConfig(DEFAULT_VOUCHER_CONFIG));
+  const [digitInput, setDigitInput] = useState('');
 
   useEffect(() => {
     fetchSettings();
@@ -96,6 +121,8 @@ const SettingsPage = () => {
         });
         // 사양 §핵심 발견 1: 컬럼 자체가 응답에 없으면 운영 DB 마이그레이션 누락.
         setActiveSlugMissing(!Object.prototype.hasOwnProperty.call(data, 'active_event_slug'));
+        // 컬럼 미적용이면 data.voucher_config 자체가 없어 undefined → 기본값(graceful).
+        setVoucherConfig(normalizeVoucherConfig(data.voucher_config));
       }
     } catch (error) {
       console.error('Error fetching settings:', error);
@@ -113,16 +140,20 @@ const SettingsPage = () => {
         shipping_cost: parseInt(settings.shipping_cost, 10),
         active_event_slug: settings.active_event_slug || null,
         free_shipping_basis: settings.free_shipping_basis || 'list_price',
+        voucher_config: normalizeVoucherConfig(voucherConfig),
         updated_at: new Date().toISOString(),
       };
       const save = (body) => supabase.from('site_settings').update(body).eq('id', 1);
       let { error } = await save(payload);
-      // free_shipping_basis 컬럼 미적용 환경 graceful — PGRST204 시 해당 키 빼고 1회 재시도.
-      // (ProductManagementPage handleSave 의 가법 컬럼 graceful 패턴과 동종)
-      if (error && error.code === 'PGRST204' && 'free_shipping_basis' in payload) {
-        const rest = { ...payload };
-        delete rest.free_shipping_basis;
-        ({ error } = await save(rest));
+      // 가법 컬럼(free_shipping_basis·voucher_config) 미적용 환경 graceful — PGRST204(스키마 캐시에
+      // 컬럼 없음) 시 오류 메시지가 가리키는 키만 빼고 재시도한다(ProductManagementPage 패턴 확장).
+      while (error && error.code === 'PGRST204') {
+        const missing = ['voucher_config', 'free_shipping_basis'].find(
+          (k) => k in payload && error.message?.includes(k),
+        );
+        if (!missing) break;
+        delete payload[missing];
+        ({ error } = await save(payload));
       }
 
       if (error) throw error;
@@ -164,6 +195,26 @@ const SettingsPage = () => {
     }
   };
 
+  // 이벤트 결제수단 — 숫자 버튼 추가(1~99 정수·중복 불가·오름차순).
+  const addDigit = () => {
+    const n = parseInt(digitInput, 10);
+    if (!Number.isInteger(n) || n < 1 || n > 99) return;
+    setDigitInput('');
+    if (voucherConfig.digits.includes(n)) return;
+    setVoucherConfig({ ...voucherConfig, digits: [...voucherConfig.digits, n].sort((a, b) => a - b) });
+  };
+  const removeDigit = (d) =>
+    setVoucherConfig({ ...voucherConfig, digits: voucherConfig.digits.filter((x) => x !== d) });
+  const addUnit = () =>
+    setVoucherConfig({ ...voucherConfig, units: [...voucherConfig.units, { label: '', value: '' }] });
+  const removeUnit = (idx) =>
+    setVoucherConfig({ ...voucherConfig, units: voucherConfig.units.filter((_, i) => i !== idx) });
+  const updateUnit = (idx, key, value) =>
+    setVoucherConfig({
+      ...voucherConfig,
+      units: voucherConfig.units.map((u, i) => (i === idx ? { ...u, [key]: value } : u)),
+    });
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
@@ -175,6 +226,7 @@ const SettingsPage = () => {
   const activeEventName = events.find((e) => e.order_url_slug === settings.active_event_slug)?.name;
   const threshold = parseInt(settings.free_shipping_threshold, 10) || 0;
   const shipping = parseInt(settings.shipping_cost, 10) || 0;
+  const voucherError = validateVoucherConfig(voucherConfig);
 
   return (
     <Box>
@@ -427,6 +479,127 @@ const SettingsPage = () => {
         </Box>
       </SectionCard>
 
+      {/* 블록 2.5 — 이벤트 결제수단 (A13 §①) */}
+      <SectionCard
+        title="이벤트 결제수단"
+        subtitle="이벤트 적용 학회에서 결제완료 처리 시 쓰는 결제수단과 금액 버튼입니다."
+        icon={PaymentsIcon}
+        sx={{ mb: 3 }}
+        padding={24}
+      >
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, mt: 1 }}>
+          {/* 용어 */}
+          <TextField
+            size="small"
+            fullWidth
+            label="용어"
+            value={voucherConfig.label}
+            onChange={(e) => setVoucherConfig({ ...voucherConfig, label: e.target.value })}
+            inputProps={{ maxLength: 10 }}
+            helperText="결제완료 창·고객 안내·입금결의서에 표시됩니다."
+          />
+
+          {/* 숫자 버튼 */}
+          <Box>
+            <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', display: 'block', mb: 1 }}>
+              숫자 버튼
+            </Typography>
+            {voucherConfig.digits.length > 0 && (
+              <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mb: 1 }}>
+                {voucherConfig.digits.map((d) => (
+                  <Chip
+                    key={d}
+                    label={d}
+                    onDelete={() => removeDigit(d)}
+                    sx={{ borderRadius: `${theme.radii.sm}px` }}
+                  />
+                ))}
+              </Box>
+            )}
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+              <TextField
+                size="small"
+                type="number"
+                placeholder="숫자 (1~99)"
+                value={digitInput}
+                onChange={(e) => setDigitInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addDigit(); } }}
+                inputProps={{ min: 1, max: 99, inputMode: 'numeric' }}
+                sx={{ width: 140 }}
+              />
+              <Button variant="outlined" onClick={addDigit} sx={{ minHeight: 40 }}>추가</Button>
+            </Box>
+          </Box>
+
+          {/* 단위 버튼 */}
+          <Box>
+            <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', display: 'block', mb: 1 }}>
+              단위 버튼
+            </Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              {voucherConfig.units.map((u, i) => (
+                <Box key={i} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                  <TextField
+                    size="small"
+                    label="라벨"
+                    value={u.label}
+                    onChange={(e) => updateUnit(i, 'label', e.target.value)}
+                    inputProps={{ maxLength: 4 }}
+                    sx={{ width: 100 }}
+                  />
+                  <TextField
+                    size="small"
+                    label="금액"
+                    type="number"
+                    value={u.value}
+                    onChange={(e) => updateUnit(i, 'value', e.target.value)}
+                    inputProps={{ min: 1, inputMode: 'numeric' }}
+                    InputProps={{ endAdornment: <InputAdornment position="end">원</InputAdornment> }}
+                    sx={{ flex: 1 }}
+                  />
+                  <IconButton onClick={() => removeUnit(i)} aria-label="단위 삭제" sx={{ color: 'text.secondary' }}>
+                    <CloseIcon sx={{ fontSize: 18 }} />
+                  </IconButton>
+                </Box>
+              ))}
+              <Button
+                variant="text"
+                startIcon={<AddIcon sx={{ fontSize: 18 }} />}
+                onClick={addUnit}
+                sx={{ alignSelf: 'flex-start', color: 'text.secondary', minHeight: 36 }}
+              >
+                단위 추가
+              </Button>
+            </Box>
+          </Box>
+
+          {/* 미리보기 — 결제완료 창에 보일 숫자·단위 버튼 줄(누르기 불가) */}
+          <Box sx={{ p: 1.5, borderRadius: `${theme.radii.md}px`, bgcolor: theme.gray[50], border: `1px solid ${theme.gray[200]}` }}>
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1, fontWeight: 600 }}>
+              미리보기 — 결제완료 창
+            </Typography>
+            {voucherConfig.digits.length > 0 && (
+              <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mb: 1 }}>
+                {voucherConfig.digits.map((d) => (
+                  <Chip key={d} label={d} variant="outlined" disabled sx={{ borderRadius: `${theme.radii.sm}px` }} />
+                ))}
+              </Box>
+            )}
+            <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
+              {voucherConfig.units.map((u, i) => (
+                <Chip key={i} label={u.label || '?'} variant="outlined" disabled sx={{ borderRadius: `${theme.radii.sm}px` }} />
+              ))}
+            </Box>
+          </Box>
+
+          {voucherError && (
+            <Typography variant="caption" sx={{ color: 'error.main' }}>
+              {voucherError}
+            </Typography>
+          )}
+        </Box>
+      </SectionCard>
+
       {/* 블록 3 — 시스템 정보 (시안 답습, readonly 노출) */}
       <SectionCard
         title="시스템 정보"
@@ -490,7 +663,7 @@ const SettingsPage = () => {
         <Button
           variant="contained"
           onClick={handleSave}
-          disabled={saving}
+          disabled={saving || Boolean(voucherError)}
           sx={{ minHeight: 44, fontWeight: 700 }}
         >
           {saving ? <CircularProgress size={20} /> : '저장하기'}

@@ -46,6 +46,31 @@ function formatEventDateRange(startDate, endDate) {
   return label;
 }
 
+// 적요 행 구성(순수 함수 — 바우처 분기 테스트용). A13 §⑧.
+//  - 바우처 0: 현행 그대로 도서·검사·도구 "매출" 3행(0원이어도 기재).
+//  - 바우처 > 0: 카테고리마다 "(카드)" 행 + 그 카테고리 바우처 > 0이면 바로 아래 "({용어})" 행.
+//    순서 도서·검사·도구. 카드 행은 0원이어도 기재, 바우처 행은 0원이면 생략. 카드 행 = 버킷 − 버킷 바우처.
+// 반환: [{ summary, counterparty, amount }] (행 9부터 순서대로). 최대 6행(도서·검사·도구 × 카드+바우처).
+export function buildDepositRows(revenue, prefix, society, voucherLabel = '바우처') {
+  const cats = [
+    { name: '도서', bucket: revenue.book || 0, voucher: revenue.bookVoucher || 0 },
+    { name: '검사', bucket: revenue.test || 0, voucher: revenue.testVoucher || 0 },
+    { name: '도구', bucket: revenue.tool || 0, voucher: revenue.toolVoucher || 0 },
+  ];
+  const row = (summary, amount) => ({ summary, counterparty: society, amount });
+
+  if (!((revenue.voucher || 0) > 0)) {
+    return cats.map((c) => row(`${prefix} ${c.name} 매출`, c.bucket));
+  }
+
+  const rows = [];
+  for (const c of cats) {
+    rows.push(row(`${prefix} ${c.name} 매출(카드)`, c.bucket - c.voucher));
+    if (c.voucher > 0) rows.push(row(`${prefix} ${c.name} 매출(${voucherLabel})`, c.voucher));
+  }
+  return rows;
+}
+
 function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -65,9 +90,11 @@ function triggerDownload(blob, filename) {
  * @param {object} [args.productsMap] - 카테고리 보강용
  * @param {string} [args.authorName] - 작성자(성명)
  * @param {string} [args.department] - 부서(미지정 시 기본 "마케팅운영팀")
+ * @param {string} [args.voucherLabel] - 바우처 용어(설정값, 미지정 시 "바우처"). A13 §⑧.
  */
-export async function exportDepositResolution({ event, orders, productsMap, authorName, department }) {
-  const { test, book, tool, unclassified, total } = computeRevenueByCategory(orders, { productsMap });
+export async function exportDepositResolution({ event, orders, productsMap, authorName, department, voucherLabel }) {
+  const revenue = computeRevenueByCategory(orders, { productsMap });
+  const { unclassified, total } = revenue;
 
   const society = (event?.host_society || '').trim();
   const eventTitle = (event?.event_season || '').trim()
@@ -101,24 +128,22 @@ export async function exportDepositResolution({ event, orders, productsMap, auth
   ws.getCell('Q5').value = department || DEFAULT_DEPARTMENT;
   ws.getCell('Q6').value = authorName || '';
 
-  // 적요 행 — 도서/검사/도구 모두 0원이어도 기재(생략 금지).
+  // 적요 행 — 바우처 0이면 도서/검사/도구 "매출" 3행(0원이어도 기재), 바우처 > 0이면
+  // 카테고리별 (카드)[+(용어)] 행(A13 §⑧). 행 9부터 채우고 남는 행(~15)은 비운다.
   const prefix = `${dateRange} ${society} ${eventTitle}`.replace(/\s+/g, ' ').trim();
-  ws.getCell('E9').value = `${prefix} 도서 매출`;
-  ws.getCell('N9').value = society;
-  ws.getCell('R9').value = book;
-  ws.getCell('E10').value = `${prefix} 검사 매출`;
-  ws.getCell('N10').value = society;
-  ws.getCell('R10').value = test;
-  ws.getCell('E11').value = `${prefix} 도구 매출`;
-  ws.getCell('N11').value = society;
-  ws.getCell('R11').value = tool;
-
-  // 양식 데모 행(12~15) 잔여 placeholder 제거 — 1학회=3행(도서/검사/도구)만 사용.
-  // (템플릿엔 패턴 예시로 E11/E12 "{학회명}..." + R11/R12 "10000000" 등이 들어있음)
-  for (let r = 12; r <= 15; r++) {
-    ws.getCell(`E${r}`).value = null;
-    ws.getCell(`N${r}`).value = null;
-    ws.getCell(`R${r}`).value = null;
+  const rows = buildDepositRows(revenue, prefix, society, voucherLabel || '바우처');
+  const FIRST_ROW = 9, LAST_ROW = 15;
+  rows.forEach((r, i) => {
+    const n = FIRST_ROW + i;
+    ws.getCell(`E${n}`).value = r.summary;
+    ws.getCell(`N${n}`).value = r.counterparty;
+    ws.getCell(`R${n}`).value = r.amount;
+  });
+  // 양식 데모 행 잔여 placeholder 제거(템플릿엔 "{학회명}..."·"10000000" 예시가 들어있음).
+  for (let n = FIRST_ROW + rows.length; n <= LAST_ROW; n++) {
+    ws.getCell(`E${n}`).value = null;
+    ws.getCell(`N${n}`).value = null;
+    ws.getCell(`R${n}`).value = null;
   }
 
   // 계
@@ -147,5 +172,6 @@ export async function exportDepositResolution({ event, orders, productsMap, auth
   const ymd = `${year}-${String(month).padStart(2, '0')}`;
   triggerDownload(blob, `입금결의서_${society || eventTitle || '행사'}_${ymd}.xlsx`);
 
+  const { test, book, tool } = revenue;
   return { test, book, tool, unclassified, total };
 }

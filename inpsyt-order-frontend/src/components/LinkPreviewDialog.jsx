@@ -78,16 +78,21 @@ const LinkPreviewDialog = ({ open, onClose, baseOrder, events, addNotification, 
 
   if (!baseOrder) return null;
 
+  // 이벤트가 적용된 주문(바우처·배송비 면제)은 합배송 대상에서 제외(A13 §⑤).
+  const voucherApplied = (o) => (o?.voucher_amount || 0) > 0 || Boolean(o?.shipping_waived);
+  const baseVoucherApplied = voucherApplied(baseOrder);
+
   // 검색어 있으면 로컬 필터(고객명·연락처 부분일치), 없으면 전체
   const term = searchTerm.trim().toLowerCase();
   const termDigits = normalizePhone(term);
-  const filteredCandidates = term
+  const filteredCandidates = (term
     ? allCandidates.filter(
         (o) =>
           (o.customer_name || '').toLowerCase().includes(term) ||
           (termDigits.length >= 2 && normalizePhone(o.phone_number).includes(termDigits))
       )
-    : allCandidates;
+    : allCandidates
+  ).filter((o) => !voucherApplied(o));
 
   const participants = [baseOrder, ...selected];
   const canPreview = participants.length >= 2;
@@ -137,6 +142,10 @@ const LinkPreviewDialog = ({ open, onClose, baseOrder, events, addNotification, 
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>합배송 만들기</DialogTitle>
       <DialogContent dividers>
+        {baseVoucherApplied ? (
+          <Alert severity="info">이벤트가 적용된 주문은 합배송으로 묶을 수 없어요.</Alert>
+        ) : (
+        <>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           주문 #{baseOrder.id}({baseOrder.customer_name})과 함께 묶을 주문을 검색해 선택하세요.
           {eventName && ` · ${eventName}`}
@@ -251,17 +260,21 @@ const LinkPreviewDialog = ({ open, onClose, baseOrder, events, addNotification, 
             />
           </Box>
         )}
+        </>
+        )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={linking}>취소</Button>
-        <Button
-          variant="contained"
-          onClick={handleCreate}
-          disabled={!canPreview || !confirmed || blockedByCaseB || linking}
-          startIcon={linking ? <CircularProgress size={14} /> : null}
-        >
-          합배송 만들기
-        </Button>
+        <Button onClick={onClose} disabled={linking}>{baseVoucherApplied ? '닫기' : '취소'}</Button>
+        {!baseVoucherApplied && (
+          <Button
+            variant="contained"
+            onClick={handleCreate}
+            disabled={!canPreview || !confirmed || blockedByCaseB || linking}
+            startIcon={linking ? <CircularProgress size={14} /> : null}
+          >
+            합배송 만들기
+          </Button>
+        )}
       </DialogActions>
     </Dialog>
   );

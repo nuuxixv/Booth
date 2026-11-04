@@ -101,6 +101,27 @@ describe('buildSalesBlock', () => {
     const block = buildSalesBlock({ orders: o, dayNumber: 1, startDate: START, endDate: END, productsMap: { p1: { category: '검사' } } });
     expect(block).toContain('검사 판매: 30,000원');
   });
+
+  it('바우처 0이면 기존 출력과 동일(회귀 0)', () => {
+    expect(buildSalesBlock({ orders, dayNumber: 1, startDate: START, endDate: END })).toBe(
+      ['0. 판매', '검사 판매: 20,000원 (배송비 0원 포함)', '도서 판매: 103,000원 (배송비 3,000원 포함)', '합계: 123,000원'].join('\n'),
+    );
+  });
+
+  it('바우처 있으면 카테고리 줄 = 카드 결제액 + "합계" 위에 "{용어} 결제" 줄', () => {
+    // 1일차 검사 100,000 중 바우처 30,000 → 카드 70,000. 합계는 총 매출 100,000 유지.
+    const o = [{ ...paid('2026-10-16T01:00:00Z', [{ category: '검사', price_at_purchase: 100000, quantity: 1 }]), voucher_amount: 30000 }];
+    const block = buildSalesBlock({ orders: o, dayNumber: 1, startDate: START, endDate: END });
+    expect(block).toBe(
+      ['0. 판매', '검사 판매: 70,000원 (배송비 0원 포함)', '도서 판매: 0원 (배송비 0원 포함)', '바우처 결제: 30,000원', '합계: 100,000원'].join('\n'),
+    );
+  });
+
+  it('용어를 바꾸면 결제 줄 라벨에 반영', () => {
+    const o = [{ ...paid('2026-10-16T01:00:00Z', [{ category: '검사', price_at_purchase: 100000, quantity: 1 }]), voucher_amount: 30000 }];
+    const block = buildSalesBlock({ orders: o, dayNumber: 1, startDate: START, endDate: END, voucherLabel: '쿠폰' });
+    expect(block).toContain('쿠폰 결제: 30,000원');
+  });
 });
 
 describe('replaceSalesBlock', () => {
@@ -127,5 +148,10 @@ describe('replaceSalesBlock', () => {
 
   it('블록이 본문 끝까지면 끝까지 교체(뒤 빈 줄 보존)', () => {
     expect(replaceSalesBlock('0. 판매\n합계: 1원\n', '0. 판매\n합계: 2원')).toBe('0. 판매\n합계: 2원\n');
+  });
+
+  it('"{용어} 결제" 줄도 블록으로 보고 교체(A13 §⑩)', () => {
+    const c = '머리말\n\n0. 판매\n검사 판매: 70,000원 (배송비 0원 포함)\n바우처 결제: 30,000원\n합계: 100,000원\n\n1. 도서 관련';
+    expect(replaceSalesBlock(c, '0. 판매\n합계: 9원')).toBe('머리말\n\n0. 판매\n합계: 9원\n\n1. 도서 관련');
   });
 });

@@ -10,7 +10,8 @@ export const getEvents = async () => {
     .from('events')
     // end_date·closed_at = PIN 주문 생성의 "진행 중 학회" 자동 선택·상태 뱃지용(+NewOrderModal 상태 뱃지).
     // sortEventsForDropdown은 start_date만 쓰므로 컬럼 추가 영향 없음.
-    .select('id, name, discount_rate, tags, host_society, start_date, end_date, closed_at')
+    // voucher_enabled = 이벤트 적용 학회 판정(상태 변경 → 이벤트 적용 모달, A13).
+    .select('id, name, discount_rate, tags, host_society, start_date, end_date, closed_at, voucher_enabled')
     .order('name', { ascending: true });
 
   if (error) {
@@ -50,7 +51,7 @@ const EVENT_DETAIL_COLUMNS =
   'id, name, discount_rate, order_url_slug, start_date, end_date, estimated_delivery_date, ' +
   'event_year, host_society, event_season, status, venue, attendee_ids, note, marketing_cost, ' +
   'draft_done, application_done, payment_resolution_done, prep_note, created_by, visible_categories, ' +
-  'setup_time, teardown_time, venue_name, venue_address, venue_detail, closed_at';
+  'setup_time, teardown_time, venue_name, venue_address, venue_detail, closed_at, voucher_enabled';
 
 /**
  * order_url_slug 로 학회 1건을 가져옵니다. (L2 학회 상세)
@@ -115,7 +116,7 @@ export const getOrdersForEventRevenue = async (eventId) => {
     .from('orders')
     // 합배송 껍데기 부모 제외(설계 §7) — 실 매출은 자식 order_items 기반.
     // created_at·status_history = 일차별 집계(결제 완료 KST) 기준.
-    .select('status, delivery_fee, is_group_parent, created_at, status_history, order_items(product_id, category, price_at_purchase, quantity)')
+    .select('status, delivery_fee, voucher_amount, is_group_parent, created_at, status_history, order_items(product_id, category, price_at_purchase, quantity)')
     .eq('is_group_parent', false)
     .eq('event_id', eventId);
 

@@ -281,7 +281,7 @@ export const searchOrdersForLinking = async (term, excludeOrderId) => {
 
   let query = supabase
     .from('orders')
-    .select('id, customer_name, phone_number, total_cost, discount_amount, final_payment, delivery_fee, status, created_at, parent_order_id, is_group_parent, event_id, shipping_address')
+    .select('id, customer_name, phone_number, total_cost, discount_amount, final_payment, delivery_fee, voucher_amount, shipping_waived, status, created_at, parent_order_id, is_group_parent, event_id, shipping_address')
     .or(clauses.join(','))
     .is('parent_order_id', null)
     .order('created_at', { ascending: false })
@@ -307,7 +307,7 @@ export const searchOrdersForLinking = async (term, excludeOrderId) => {
 export const getLinkableOrdersByEvent = async (eventId, excludeOrderId) => {
   let query = supabase
     .from('orders')
-    .select('id, customer_name, phone_number, total_cost, discount_amount, final_payment, delivery_fee, status, created_at, parent_order_id, is_group_parent, event_id, shipping_address')
+    .select('id, customer_name, phone_number, total_cost, discount_amount, final_payment, delivery_fee, voucher_amount, shipping_waived, status, created_at, parent_order_id, is_group_parent, event_id, shipping_address')
     .eq('event_id', eventId)
     .is('parent_order_id', null)
     // preparing(현장 도움·준비중)은 미완료라 합배송 후보에서 제외. 기존 cancelled/refunded

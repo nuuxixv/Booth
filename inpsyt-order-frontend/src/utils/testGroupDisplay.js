@@ -51,6 +51,33 @@ export function shouldShowCategoryChips(visibleCategories) {
   return SUBCATEGORY_CHIP_CATEGORIES.includes(visibleCategories[0]);
 }
 
+// 뷰 모드 칩(인기·신규출시) 자동 숨김 판정 — 행사 노출 상품 전체(baseProducts) 기준 1회.
+// is_popular=true가 0건이면 "인기" 칩, is_new=true가 0건이면 "신규출시" 칩을 숨긴다.
+// 판정은 is_popular 불리언만 본다 — 인기 탭 태그 폴백(resolvePopularFilter tier2)은 판정에 쓰지
+// 않는다(인기 아닌 상품이 "인기" 칩에 뜨는 혼선 방지, 2026-11-04 건우님). 둘 다 없으면 showRow=false
+// → 뷰 모드 칩 줄 전체를 숨기고 전체 상품을 보여 준다. 기본 탭은 호출부가 showPopular로 결정.
+export function resolveViewModeChips(products) {
+  const list = products || [];
+  const showPopular = list.some((p) => p.is_popular);
+  const showNew = list.some((p) => p.is_new);
+  return { showPopular, showNew, showRow: showPopular || showNew };
+}
+
+// 카테고리 칩 자동 숨김 판정 — "전체"를 뺀 칩 중 상품이 1개 이상인 것만 남기고, 남은 칩이 2개 미만이면
+// 줄 전체를 숨긴다(2026-11-04 건우님). 호출부에서 shouldShowCategoryChips와 AND로 결합한다.
+// - 다중 대분류(일반 학회): normalizeCategory(category) 기준.
+// - 단일 대분류: sub_category('기타' 폴백) 기준(productMatchesSubCategory 재사용).
+// categoryKeys = "전체"를 제외한 칩 키 후보(컴포넌트의 categories). keptKeys는 입력 순서를 보존한다.
+export function resolveCategoryChips(products, categoryKeys, isSingleCategory) {
+  const list = products || [];
+  const hasProducts = (key) =>
+    list.some((p) => (isSingleCategory
+      ? productMatchesSubCategory(p, key)
+      : normalizeCategory(p.category) === key));
+  const keptKeys = (categoryKeys || []).filter(hasProducts);
+  return { keptKeys, showRow: keptKeys.length >= 2 };
+}
+
 /**
  * 검사군 마스터 배열 → 노출 검사군 메타 맵(is_active=false 제외).
  * @param {Array} master test_groups 행 배열

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeCategory, buildGroupMetaMap, groupTestProducts, productMatchesEventTags, productMatchesSubCategory, shouldShowCategoryChips, resolvePopularFilter } from './testGroupDisplay';
+import { normalizeCategory, buildGroupMetaMap, groupTestProducts, productMatchesEventTags, productMatchesSubCategory, shouldShowCategoryChips, resolvePopularFilter, resolveViewModeChips, resolveCategoryChips } from './testGroupDisplay';
 
 const master = [
   { id: 1, abbr: 'K·BASC-3', name: '한국판 정서-행동 평가시스템', sort_order: 1, is_active: true },
@@ -240,5 +240,69 @@ describe('resolvePopularFilter', () => {
     const groupNoMatch = { options: [tagOnly, popularOnly] };
     expect(group.options.some(f)).toBe(true);
     expect(groupNoMatch.options.some(f)).toBe(false);
+  });
+});
+
+// 뷰 모드 칩 자동 숨김 — 행사 노출 상품(baseProducts) 기준 is_popular·is_new 유무(2026-11-04).
+describe('resolveViewModeChips', () => {
+  it('인기만 있음 → 인기 칩만, 줄 노출', () => {
+    const r = resolveViewModeChips([{ is_popular: true }, { is_new: false }]);
+    expect(r).toEqual({ showPopular: true, showNew: false, showRow: true });
+  });
+  it('신규만 있음 → 신규 칩만, 줄 노출', () => {
+    const r = resolveViewModeChips([{ is_new: true }, { is_popular: false }]);
+    expect(r).toEqual({ showPopular: false, showNew: true, showRow: true });
+  });
+  it('둘 다 없음 → 줄 숨김', () => {
+    const r = resolveViewModeChips([{ is_popular: false, is_new: false }, {}]);
+    expect(r).toEqual({ showPopular: false, showNew: false, showRow: false });
+  });
+  it('빈·null 상품도 안전(줄 숨김)', () => {
+    expect(resolveViewModeChips([]).showRow).toBe(false);
+    expect(resolveViewModeChips(null).showRow).toBe(false);
+    expect(resolveViewModeChips(undefined).showRow).toBe(false);
+  });
+});
+
+// 카테고리 칩 자동 숨김 — 상품 있는 칩만 남기고 2개 미만이면 줄 숨김(2026-11-04).
+describe('resolveCategoryChips', () => {
+  it('다중 대분류인데 검사(도구 포함)만 → 검사 1칩, 줄 숨김', () => {
+    const products = [
+      { category: '검사' }, { category: '도구' }, // 도구→검사 정규화
+    ];
+    const r = resolveCategoryChips(products, ['검사', '도서'], false);
+    expect(r.keptKeys).toEqual(['검사']);
+    expect(r.showRow).toBe(false);
+  });
+  it('다중 대분류에 검사·도서 둘 다 상품 → 2칩, 줄 노출', () => {
+    const products = [{ category: '검사' }, { category: '도서' }];
+    const r = resolveCategoryChips(products, ['검사', '도서'], false);
+    expect(r.keptKeys).toEqual(['검사', '도서']);
+    expect(r.showRow).toBe(true);
+  });
+  it('도구 단독인데 소분류가 전부 비어 "기타"뿐 → 1칩, 줄 숨김', () => {
+    const products = [{ category: '도구' }, { category: '도구', sub_category: null }];
+    const r = resolveCategoryChips(products, ['기타'], true);
+    expect(r.keptKeys).toEqual(['기타']);
+    expect(r.showRow).toBe(false);
+  });
+  it('도구 단독 소분류 2개 이상 → 줄 노출', () => {
+    const products = [
+      { category: '도구', sub_category: '인지' },
+      { category: '도구', sub_category: '언어' },
+    ];
+    const r = resolveCategoryChips(products, ['언어', '인지'], true);
+    expect(r.keptKeys).toEqual(['언어', '인지']);
+    expect(r.showRow).toBe(true);
+  });
+  it('상품 없는 후보 칩은 제외(순서 보존)', () => {
+    const products = [{ category: '검사' }, { category: '도서' }];
+    // 후보에 '도구'(normalize 검사와 다른 키) 있어도 매칭 상품 없으면 제외
+    const r = resolveCategoryChips(products, ['검사', '도서', '도구'], false);
+    expect(r.keptKeys).toEqual(['검사', '도서']);
+  });
+  it('빈·null 방어', () => {
+    expect(resolveCategoryChips(null, ['검사', '도서'], false)).toEqual({ keptKeys: [], showRow: false });
+    expect(resolveCategoryChips([{ category: '검사' }], null, false)).toEqual({ keptKeys: [], showRow: false });
   });
 });

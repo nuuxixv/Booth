@@ -4,6 +4,7 @@
 > 시안과 실서비스 구현은 이 시트의 모든 항목을 1:1로 반영해야 한다.
 > 임의 단순화·통합·생략은 건우님의 명시적 승인 후 이 시트를 먼저 갱신한 다음에만 허용된다.
 > 신설 2026-07-20 · **개정 2026-07-28**(UX 검토 반영 8건 — 점진 노출·블록 통합·드롭다운 강제 등) · **개정 2026-10-12**(학회 개선 트랙 2차 — 설치/철거 시간 2칸 + 장소 구조화(장소명·주소·홀/층 상세) + DB 5컬럼 추가).
+> **개정 2026-11-04**(이벤트 적용 토글 — `A13_VoucherEvent.md` §②): `EventOptionalFields`(생성·L2 편집 공용) 1행 할인율 칸 아래에 Switch "이벤트 적용"(`voucher_enabled`) + 보조 문구 "켜면 결제완료 처리 때 {용어}·배송비 면제를 적용하는 창이 뜹니다."({용어}=`useVoucherConfig().label`). `voucher_enabled`를 `FORM_FIELDS`·`emptyEvent`(false)·`EVENT_DETAIL_COLUMNS`·`getEvents` select에 반영(라운드트립 소거 방지). `normalizeEventPayload`에서 `!!` boolean 강제. 생성 insert·L2 update 모두 `normalizeEventPayload` 경유라 자동 반영. **L2 개요 읽기 화면의 "이벤트 적용 켜짐" 배지(A13 §② 마지막 항목)는 `EventDetailPage` 소관으로 미구현**(별도 작업). 검증: vitest 471 passed(eventForm 신규 2·FORM_FIELDS 20)·lint 신규 0·build 성공.
 
 ## 설계 목표 (건우님 확정 문구)
 

@@ -1,9 +1,10 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ThemeProvider } from '@mui/material';
 import { MemoryRouter } from 'react-router-dom';
 import OrderManagementPage from './OrderManagementPage';
+import StatusChangeModal from './StatusChangeModal';
 import theme from '../theme';
 import { AuthContext } from '../AuthContext';
 import { NotificationContext } from '../NotificationContext';
@@ -116,4 +117,60 @@ describe.skip('OrderManagementPage', () => {
     expect(rows.length).toBe(mockOrders.length + 1);
   });
 
+});
+
+// 상태 변경 모달(A13 §③) — Select를 대체한 모달이 허용 전이 버튼을 노출하는지 검증.
+const renderModal = (ui) => render(<ThemeProvider theme={theme}>{ui}</ThemeProvider>);
+
+describe('StatusChangeModal', () => {
+  it('결제대기 주문은 결제완료·주문취소 버튼을 노출한다', () => {
+    const onSelect = vi.fn();
+    renderModal(
+      <StatusChangeModal
+        open
+        onClose={vi.fn()}
+        order={{ id: 7, customer_name: '홍길동', status: 'pending', event_id: 1 }}
+        voucherEnabled={false}
+        isGroupChild={false}
+        voucherLabel="바우처"
+        onSelect={onSelect}
+      />
+    );
+    expect(screen.getByRole('button', { name: '결제완료' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '주문취소' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '결제완료' }));
+    expect(onSelect).toHaveBeenCalledWith('paid');
+  });
+
+  it('합배송 자식 + 이벤트 ON이면 결제완료 아래 안내 문구를 보인다', () => {
+    renderModal(
+      <StatusChangeModal
+        open
+        onClose={vi.fn()}
+        order={{ id: 8, customer_name: '김철수', status: 'pending', event_id: 1 }}
+        voucherEnabled
+        isGroupChild
+        voucherLabel="바우처"
+        onSelect={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/합배송 주문은 바우처를 적용할 수 없어요/)).toBeInTheDocument();
+  });
+
+  it('종결 상태(결제완료)는 결제취소만 노출한다', () => {
+    renderModal(
+      <StatusChangeModal
+        open
+        onClose={vi.fn()}
+        order={{ id: 9, customer_name: '이영희', status: 'paid', event_id: 1 }}
+        voucherEnabled={false}
+        isGroupChild={false}
+        voucherLabel="바우처"
+        onSelect={vi.fn()}
+      />
+    );
+    expect(screen.getByRole('button', { name: '결제취소' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '결제완료' })).not.toBeInTheDocument();
+  });
 });

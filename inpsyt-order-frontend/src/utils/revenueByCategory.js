@@ -8,6 +8,11 @@
 //    (기존 "검사 우선" 정신 유지 — 검사가 있으면 검사로. 검사 없고 도구 있으면 도구로.)
 //  - 면세(공급가/부가세 분리 없음).
 //  - 합계: total = test + book + tool + unclassified (각 버킷에 귀속 배송비 포함).
+//  - 바우처(A13, 2026-11-04): 결제수단(할인 아님). 버킷 금액(총 매출)은 불변이고, 그 안의
+//    바우처 결제분만 testVoucher/bookVoucher/toolVoucher/unclassifiedVoucher로 따로 집계한다.
+//    주문별 v = min(voucher_amount, 그 주문 매출)을 검사>도구>도서>미분류 순(배송비와 같은
+//    우선순위)으로 각 버킷의 그 주문 금액(귀속 배송비 포함)까지 채우고 넘치면 다음 버킷.
+//    카드 결제액 = 버킷 − 버킷 바우처(소비처에서 계산). 바우처 0이면 모든 추가 반환이 0 → 회귀 없음.
 //
 // 도구 분리 전후 total 불변: 도구가 검사에서 빠져 tool 버킷으로 이동할 뿐 총합은 동일.
 
@@ -29,15 +34,17 @@ function isTestCategory(cat) {
 }
 
 /**
- * @param {Array} orders - { status, delivery_fee, order_items:[{category, product_id, price_at_purchase, quantity}] }
+ * @param {Array} orders - { status, delivery_fee, voucher_amount, order_items:[{category, product_id, price_at_purchase, quantity}] }
  * @param {object} [opts] - { productsMap } 카테고리 보강용(item.category 없을 때)
  * @returns {{ test:number, book:number, tool:number, unclassified:number, total:number,
- *             testShipping:number, bookShipping:number, toolShipping:number }}
+ *             testShipping:number, bookShipping:number, toolShipping:number,
+ *             testVoucher:number, bookVoucher:number, toolVoucher:number, unclassifiedVoucher:number, voucher:number }}
  */
 export function computeRevenueByCategory(orders, opts = {}) {
   const { productsMap } = opts;
   let test = 0, book = 0, tool = 0, unclassified = 0;
   let testShipping = 0, bookShipping = 0, toolShipping = 0;
+  let testVoucher = 0, bookVoucher = 0, toolVoucher = 0, unclassifiedVoucher = 0;
 
   for (const order of orders || []) {
     if (!PAID_STATUSES.includes(order.status)) continue;
@@ -56,18 +63,28 @@ export function computeRevenueByCategory(orders, opts = {}) {
       }
     }
 
+    // 배송비 귀속 — 검사 > 도구 > 도서 우선순위로 한 버킷에만. 귀속 후 버킷의 그 주문 금액(= 바우처 상한)이 확정된다.
+    const ship = order.delivery_fee || 0;
+    if (ship > 0) {
+      if (orderTest > 0) { orderTest += ship; testShipping += ship; }
+      else if (orderTool > 0) { orderTool += ship; toolShipping += ship; }
+      else if (orderBook > 0) { orderBook += ship; bookShipping += ship; }
+      else { orderUnclassified += ship; } // 미분류만 있는 주문 — 배송비도 미분류로
+    }
+
     test += orderTest;
     book += orderBook;
     tool += orderTool;
     unclassified += orderUnclassified;
 
-    // 배송비 귀속 — 검사 > 도구 > 도서 우선순위로 한 버킷에만.
-    const ship = order.delivery_fee || 0;
-    if (ship > 0) {
-      if (orderTest > 0) { test += ship; testShipping += ship; }
-      else if (orderTool > 0) { tool += ship; toolShipping += ship; }
-      else if (orderBook > 0) { book += ship; bookShipping += ship; }
-      else { unclassified += ship; } // 미분류만 있는 주문 — 배송비도 미분류로
+    // 바우처 귀속 — 결제수단(총 매출 불변). 배송비와 같은 우선순위(검사>도구>도서>미분류)로
+    // 각 버킷의 그 주문 금액(귀속 배송비 포함)까지 채우고 넘치면 다음 버킷. v는 주문 매출 이하로 상한.
+    let v = Math.min(order.voucher_amount || 0, orderTest + orderTool + orderBook + orderUnclassified);
+    if (v > 0) {
+      const toTest = Math.min(v, orderTest); testVoucher += toTest; v -= toTest;
+      const toTool = Math.min(v, orderTool); toolVoucher += toTool; v -= toTool;
+      const toBook = Math.min(v, orderBook); bookVoucher += toBook; v -= toBook;
+      unclassifiedVoucher += v; // 남은 분은 미분류(미분류 금액 이하로 자연 수렴)
     }
   }
 
@@ -75,5 +92,7 @@ export function computeRevenueByCategory(orders, opts = {}) {
     test, book, tool, unclassified,
     total: test + book + tool + unclassified,
     testShipping, bookShipping, toolShipping,
+    testVoucher, bookVoucher, toolVoucher, unclassifiedVoucher,
+    voucher: testVoucher + bookVoucher + toolVoucher + unclassifiedVoucher,
   };
 }

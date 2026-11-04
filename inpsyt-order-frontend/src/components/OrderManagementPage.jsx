@@ -34,10 +34,12 @@ import { format, subDays } from 'date-fns';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../hooks/useAuth';
 import { useNotification } from '../hooks/useNotification';
-import { ShoppingCart as ShoppingCartIcon, RestartAlt as RestartAltIcon } from '@mui/icons-material';
+import { ShoppingCart as ShoppingCartIcon, RestartAlt as RestartAltIcon, ArrowDropDown as ArrowDropDownIcon } from '@mui/icons-material';
 import { useSearchParams } from 'react-router-dom';
 import OrderDetailModal from './OrderDetailModal';
 import GroupOrderModal from './GroupOrderModal';
+import StatusChangeModal from './StatusChangeModal';
+import VoucherPaymentModal from './VoucherPaymentModal';
 import NewOrderModal from './NewOrderModal';
 import NewOrderBranchDialog from './NewOrderBranchDialog';
 import PinOrderCreateDialog from './PinOrderCreateDialog';
@@ -55,6 +57,7 @@ import { isPreparingOrder } from '../utils/pinOrder';
 import { playBeep } from '../utils/playBeep';
 import { PageHeader, SectionCard, StatusBadge, EmptyState, DateField } from './ui';
 import { STATUS_TO_KOREAN, ALLOWED_TRANSITIONS } from '../constants/orderStatus';
+import { useVoucherConfig } from '../hooks/useVoucherConfig';
 
 const statusToKorean = STATUS_TO_KOREAN;
 
@@ -213,6 +216,10 @@ const OrderManagementPage = () => {
   }));
   const [bulkStatus, setBulkStatus] = React.useState('');
   const [pick, setPick] = React.useState({ open: false, oldRep: null, candidates: [], newStatus: null, groupParentId: null });
+  // 상태 변경 모달(A13 §③) · 이벤트 적용 모달(§④)
+  const voucherConfig = useVoucherConfig();
+  const [statusModal, setStatusModal] = React.useState({ open: false, order: null, isGroupChild: false, node: null, child: null });
+  const [voucherModal, setVoucherModal] = React.useState({ open: false, order: null });
   // "+신규 주문" 분기 → PIN 주문 / 수기 주문
   const [branchOpen, setBranchOpen] = React.useState(false);
   const [pinCreateOpen, setPinCreateOpen] = React.useState(false);
@@ -370,6 +377,21 @@ const OrderManagementPage = () => {
     }
   }, [state.orders, pendingOpenOrderId]);
 
+  // paid 전환 후 알림톡 자동 발송(현장수령은 api가 skip). 단건·이벤트 적용 모달 공용.
+  const sendPaidAlimtalk = useCallback((orderId) => {
+    sendAlimtalk(orderId).then(({ success, error: alimtalkError, skipped }) => {
+      if (skipped) return;
+      if (!success) addNotification(`알림톡 발송 실패 — ${alimtalkError}`, 'warning');
+      else addNotification('알림톡 발송 완료', 'info');
+      fetchOrders();
+    });
+  }, [addNotification, fetchOrders]);
+
+  const voucherEnabledForEvent = useCallback(
+    (eventId) => Boolean(state.events.find((e) => e.id === eventId)?.voucher_enabled),
+    [state.events]
+  );
+
   const handleBulkStatusUpdate = async () => {
     if (!bulkStatus || state.selectedOrders.length === 0) {
       addNotification('변경할 상태를 선택하고, 하나 이상의 주문을 선택해주세요.', 'warning');
@@ -386,6 +408,17 @@ const OrderManagementPage = () => {
       dispatch({ type: 'SET_SELECTED_ORDERS', payload: [] });
       setBulkStatus('');
       return;
+    }
+
+    // 결제완료 일괄 전환 시 이벤트 ON 학회 주문은 바우처 없이 처리됨을 확인(A13 §③).
+    if (bulkStatus === 'paid') {
+      const eventCount = allowedIds.filter((id) => {
+        const o = state.orders.find((ord) => ord.id === id);
+        return o && voucherEnabledForEvent(o.event_id);
+      }).length;
+      if (eventCount > 0 && !window.confirm(`이벤트 적용 학회 주문 ${eventCount}건은 ${voucherConfig.label} 없이 결제완료됩니다. 계속할까요?`)) {
+        return;
+      }
     }
 
     dispatch({ type: 'SET_STATE', payload: { loading: true } });
@@ -443,18 +476,54 @@ const OrderManagementPage = () => {
       fetchOrders();
 
       // paid 전환 시 알림톡 자동 발송 (현장 수령 제외)
-      if (newStatus === 'paid') {
-        sendAlimtalk(orderId).then(({ success, error: alimtalkError, skipped }) => {
-          if (skipped) return;
-          if (!success) addNotification(`알림톡 발송 실패 — ${alimtalkError}`, 'warning');
-          else addNotification('알림톡 발송 완료', 'info');
-          fetchOrders();
-        });
-      }
+      if (newStatus === 'paid') sendPaidAlimtalk(orderId);
     } catch (err) {
       addNotification(`주문 상태 업데이트 실패: ${err.message}`, 'error');
     }
-  }, [fetchOrders, addNotification, state.orders]);
+  }, [fetchOrders, addNotification, sendPaidAlimtalk]);
+
+  // 상태 변경 모달 선택 → 라우팅(A13 §③). 합배송 자식=위임 경로, 이벤트 ON 단독 결제완료=이벤트 적용 모달.
+  const handleStatusModalSelect = (newStatus) => {
+    const { order, isGroupChild, node, child } = statusModal;
+    setStatusModal((s) => ({ ...s, open: false }));
+    if (!order) return;
+    if (isGroupChild) {
+      handleGroupChildStatusChange(node, child, newStatus);
+      return;
+    }
+    if (newStatus === 'paid' && voucherEnabledForEvent(order.event_id)) {
+      setVoucherModal({ open: true, order });
+      return;
+    }
+    handleStatusChange(order.id, newStatus);
+  };
+
+  // 이벤트 적용 모달 확정(결제완료) — 한 번의 update로 상태·바우처·배송비 동시 저장(A13 §④).
+  const handleVoucherConfirm = async (payload) => {
+    const order = voucherModal.order;
+    if (!order) return false;
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .update({ status: 'paid', ...payload })
+        .eq('id', order.id)
+        .eq('status', 'pending')
+        .select();
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        addNotification('다른 화면에서 이미 상태가 바뀌었어요. 목록을 새로고침합니다.', 'warning');
+        fetchOrders();
+        return true;
+      }
+      addNotification(`주문 ${order.id}을 결제완료 처리했습니다.`, 'success');
+      fetchOrders();
+      sendPaidAlimtalk(order.id);
+      return true;
+    } catch (err) {
+      addNotification(`결제완료 처리 실패: ${err.message}`, 'error');
+      return false;
+    }
+  };
 
   // 합배송 자식 행 상태 변경 — 대표 취소·환불 시 배송지 위임 경로를 태운다 (GroupOrderModal과 동일 규칙).
   const handleGroupChildStatusChange = async (node, child, newStatus) => {
@@ -553,6 +622,31 @@ const OrderManagementPage = () => {
 
   const openOrder = (order) => dispatch({ type: 'OPEN_ORDER_DETAIL', payload: order });
 
+  // 상태 칸 — 전이 가능하면 "배지 + 드롭다운 캐럿" 버튼(클릭 시 상태 변경 모달), 아니면 읽기전용 배지(A13 §③).
+  const renderStatusTrigger = (status, onOpen) => {
+    const transitions = ALLOWED_TRANSITIONS[status] || [];
+    const canOpen = transitions.length > 0 && hasPermission('orders:edit');
+    if (!canOpen) {
+      return <StatusBadge value={status} size="sm" label={statusToKorean[status]} />;
+    }
+    return (
+      <Box
+        role="button"
+        tabIndex={0}
+        onClick={(e) => { e.stopPropagation(); onOpen(); }}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onOpen(); } }}
+        sx={{
+          display: 'inline-flex', alignItems: 'center', gap: 0.25, cursor: 'pointer',
+          borderRadius: `${theme.radii.sm}px`, px: 0.25, py: 0.25,
+          '&:hover': { bgcolor: theme.gray[100] },
+        }}
+      >
+        <StatusBadge value={status} size="sm" label={statusToKorean[status]} />
+        <ArrowDropDownIcon sx={{ fontSize: 18, color: theme.gray[500] }} />
+      </Box>
+    );
+  };
+
   // ─── 데스크톱 행 렌더 ───────────────────────────────
   const renderSingleRow = (order) => {
     const isSelected = state.selectedOrders.indexOf(order.id) !== -1;
@@ -588,24 +682,11 @@ const OrderManagementPage = () => {
                 <Button size="small" variant="text" color="error" onClick={() => handleStatusChange(order.id, 'cancelled')} sx={{ minHeight: 32, px: 1 }}>취소</Button>
               )}
             </Box>
-          ) : (() => {
-            const transitions = ALLOWED_TRANSITIONS[order.status] || [];
-            return transitions.length === 0 ? (
-              <StatusBadge value={order.status} size="sm" label={statusToKorean[order.status]} />
-            ) : (
-              <FormControl size="small" variant="outlined" sx={{ minWidth: 120 }} onClick={(e) => e.stopPropagation()}>
-                <Select
-                  value=""
-                  displayEmpty
-                  renderValue={() => statusToKorean[order.status]}
-                  onChange={(e) => handleStatusChange(order.id, e.target.value)}
-                  disabled={!hasPermission('orders:edit')}
-                >
-                  {transitions.map((key) => <MenuItem key={key} value={key}>{statusToKorean[key]}</MenuItem>)}
-                </Select>
-              </FormControl>
-            );
-          })()}
+          ) : (
+            <Box onClick={(e) => e.stopPropagation()}>
+              {renderStatusTrigger(order.status, () => setStatusModal({ open: true, order, isGroupChild: false, node: null, child: null }))}
+            </Box>
+          )}
           {order.alimtalk_status === 'failed' && (<Box sx={{ mt: 0.5 }}><AlimtalkFailBadge /></Box>)}
         </TableCell>
       </TableRow>
@@ -646,7 +727,6 @@ const OrderManagementPage = () => {
       </TableRow>,
     ];
     children.forEach((child) => {
-      const childTransitions = ALLOWED_TRANSITIONS[child.status] || [];
       rows.push(
         <TableRow key={`child-${child.id}`} hover onClick={() => openOrder(shell)} sx={{ cursor: 'pointer' }}>
           {colSpanForEdit === 1 && <TableCell padding="checkbox" />}
@@ -658,21 +738,9 @@ const OrderManagementPage = () => {
           <TableCell sx={{ color: 'text.secondary' }}>{(child.final_payment || 0).toLocaleString()}원</TableCell>
           <TableCell sx={{ color: 'text.secondary' }}>{format(new Date(child.created_at), 'yyyy-MM-dd HH:mm')}</TableCell>
           <TableCell>
-            {childTransitions.length === 0 ? (
-              <StatusBadge value={child.status} size="sm" label={statusToKorean[child.status]} />
-            ) : (
-              <FormControl size="small" variant="outlined" sx={{ minWidth: 120 }} onClick={(e) => e.stopPropagation()}>
-                <Select
-                  value=""
-                  displayEmpty
-                  renderValue={() => statusToKorean[child.status]}
-                  onChange={(e) => handleGroupChildStatusChange(node, child, e.target.value)}
-                  disabled={!hasPermission('orders:edit')}
-                >
-                  {childTransitions.map((key) => <MenuItem key={key} value={key}>{statusToKorean[key]}</MenuItem>)}
-                </Select>
-              </FormControl>
-            )}
+            <Box onClick={(e) => e.stopPropagation()}>
+              {renderStatusTrigger(child.status, () => setStatusModal({ open: true, order: child, isGroupChild: true, node, child }))}
+            </Box>
           </TableCell>
         </TableRow>
       );
@@ -1165,6 +1233,28 @@ const OrderManagementPage = () => {
         settings={state.settings}
         addNotification={addNotification}
         onDone={() => { setPick({ open: false, oldRep: null, candidates: [], newStatus: null, groupParentId: null }); fetchOrders(); }}
+      />
+
+      {/* 상태 변경 모달(A13 §③) */}
+      <StatusChangeModal
+        open={statusModal.open}
+        onClose={() => setStatusModal((s) => ({ ...s, open: false }))}
+        order={statusModal.order}
+        voucherEnabled={statusModal.order ? voucherEnabledForEvent(statusModal.order.event_id) : false}
+        isGroupChild={statusModal.isGroupChild}
+        voucherLabel={voucherConfig.label}
+        onSelect={handleStatusModalSelect}
+      />
+
+      {/* 이벤트 적용 모달 — 결제완료 처리(A13 §④) */}
+      <VoucherPaymentModal
+        open={voucherModal.open}
+        onClose={() => setVoucherModal({ open: false, order: null })}
+        order={voucherModal.order}
+        config={voucherConfig}
+        settings={state.settings}
+        mode="create"
+        onConfirm={handleVoucherConfirm}
       />
     </Box>
   );

@@ -43,6 +43,7 @@ import {
   EmojiEvents as TrophyIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
+  ConfirmationNumber as VoucherIcon,
 } from '@mui/icons-material';
 import { supabase } from '../supabaseClient';
 import { formatISO, startOfToday, format } from 'date-fns';
@@ -53,6 +54,7 @@ import { useNavigate } from 'react-router-dom';
 import { STATUS_TO_KOREAN as statusToKorean, STATUS_COLORS as statusColors } from '../constants/orderStatus';
 import { PageHeader, SectionCard, StatCard, StatusBadge, EmptyState } from './ui';
 import { computeRevenueByCategory, PAID_STATUSES } from '../utils/revenueByCategory';
+import { useVoucherConfig } from '../hooks/useVoucherConfig';
 import { CATEGORY_COLORS } from '../constants/categoryColors';
 import FieldReportSection from './FieldReportSection';
 import { groupEventsForDropdown, formatEventStartDate } from '../utils/eventSort';
@@ -287,6 +289,7 @@ const DashboardPage = () => {
   const [refreshing, setRefreshing] = useState(false);
   const { hasPermission } = useAuth();
   const { addNotification } = useNotification();
+  const voucherConfig = useVoucherConfig(); // 이벤트 결제수단 용어(바우처 카드 라벨) — A13 §⑨
 
   // Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -395,7 +398,7 @@ const DashboardPage = () => {
     const dateTo = selectedDate ? new Date(selectedDate + 'T23:59:59.999+09:00').toISOString() : null;
 
     // 매출 집계는 껍데기 부모(is_group_parent) 제외 — 실 매출은 자식 order_items 기반(설계 §7).
-    let ordersQ = supabase.from('orders').select('id, final_payment, delivery_fee, status, created_at, is_group_parent, order_items(product_id, quantity, price_at_purchase, product_name, product_code, category, list_price)').eq('is_group_parent', false).in('event_id', eventIds);
+    let ordersQ = supabase.from('orders').select('id, final_payment, delivery_fee, voucher_amount, status, created_at, is_group_parent, order_items(product_id, quantity, price_at_purchase, product_name, product_code, category, list_price)').eq('is_group_parent', false).in('event_id', eventIds);
     let recentQ = supabase.from('orders').select('*, events(name), order_items(*, products(*))').in('event_id', eventIds).order('created_at', { ascending: false }).limit(5);
     if (dateFrom) {
       ordersQ = ordersQ.gte('created_at', dateFrom).lte('created_at', dateTo);
@@ -468,6 +471,7 @@ const DashboardPage = () => {
     const {
       test: testRevenue, book: bookRevenue, tool: toolRevenue,
       total: totalRevenue, testShipping, bookShipping, toolShipping,
+      testVoucher, bookVoucher, toolVoucher, voucher,
     } = computeRevenueByCategory(orders, { productsMap });
 
     const salesList = Object.values(productSales);
@@ -488,6 +492,7 @@ const DashboardPage = () => {
     setDashboardData({
       eventName: targetEventName, totalRevenue, bookRevenue, testRevenue, toolRevenue,
       testShipping, bookShipping, toolShipping, yoyPct,
+      testVoucher, bookVoucher, toolVoucher, voucher,
       totalOrders: orders.length, statusCounts, bookTop5, testTop5, toolTop5, todayOrdersCount,
       recentOrders: recentRes.data || [],
     });
@@ -721,25 +726,32 @@ const DashboardPage = () => {
                 </Box>
               </Box>
               {/* 매출 합산 — 검사/도서/도구 3버킷(도구 독립, 2026-06-24 건우님).
-                  0원 버킷은 숨겨 1~3열로 동적 분할(flex:1 균등). */}
+                  0원 버킷은 숨겨 1~3열로 동적 분할(flex:1 균등). A13 §⑨: 카테고리 카드 = 카드 결제액
+                  (버킷 − 버킷 바우처), 노출 조건은 총 매출 버킷 > 0. 바우처 합계 > 0이면 "{용어} 결제" 카드 추가. */}
               <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: { xs: 2, sm: 3 } }}>
-                {[
-                  { key: 'test', label: '검사 판매', revenue: dashboardData.testRevenue || 0, shipping: dashboardData.testShipping || 0, icon: TestIcon, color: theme.accent.tests },
-                  { key: 'book', label: '도서 판매', revenue: dashboardData.bookRevenue || 0, shipping: dashboardData.bookShipping || 0, icon: BookIcon, color: theme.accent.books },
-                  { key: 'tool', label: '도구 판매', revenue: dashboardData.toolRevenue || 0, shipping: dashboardData.toolShipping || 0, icon: ToolIcon, color: CATEGORY_COLORS.tool },
-                ]
-                  .filter(b => b.revenue > 0)
-                  .map(b => (
+                {(() => {
+                  const cards = [
+                    { key: 'test', label: '검사 판매', revenue: dashboardData.testRevenue || 0, voucher: dashboardData.testVoucher || 0, shipping: dashboardData.testShipping || 0, icon: TestIcon, color: theme.accent.tests },
+                    { key: 'book', label: '도서 판매', revenue: dashboardData.bookRevenue || 0, voucher: dashboardData.bookVoucher || 0, shipping: dashboardData.bookShipping || 0, icon: BookIcon, color: theme.accent.books },
+                    { key: 'tool', label: '도구 판매', revenue: dashboardData.toolRevenue || 0, voucher: dashboardData.toolVoucher || 0, shipping: dashboardData.toolShipping || 0, icon: ToolIcon, color: CATEGORY_COLORS.tool },
+                  ]
+                    .filter(b => b.revenue > 0)
+                    .map(b => ({ key: b.key, label: `${b.label} (배송비 ${b.shipping.toLocaleString()}원 포함)`, value: b.revenue - b.voucher, icon: b.icon, color: b.color }));
+                  if ((dashboardData.voucher || 0) > 0) {
+                    cards.push({ key: 'voucher', label: `${voucherConfig.label} 결제`, value: dashboardData.voucher, icon: VoucherIcon, color: theme.accent.shipping });
+                  }
+                  return cards.map(b => (
                     <Box key={b.key} sx={{ flex: 1, minWidth: 0 }}>
                       <StatCard
-                        label={`${b.label} (배송비 ${b.shipping.toLocaleString()}원 포함)`}
-                        value={b.revenue.toLocaleString()}
+                        label={b.label}
+                        value={b.value.toLocaleString()}
                         unit="원"
                         icon={b.icon}
                         color={b.color}
                       />
                     </Box>
-                  ))}
+                  ));
+                })()}
               </Box>
             </Box>
           </SectionCard>

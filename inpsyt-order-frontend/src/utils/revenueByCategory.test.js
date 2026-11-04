@@ -11,6 +11,12 @@ const order = (status, deliveryFee, items) => ({
   })),
 });
 
+// 바우처(voucher_amount) 포함 주문 빌더 — A13 §⑦ 테스트용.
+const voucherOrder = (status, deliveryFee, voucherAmount, items) => ({
+  ...order(status, deliveryFee, items),
+  voucher_amount: voucherAmount,
+});
+
 describe('PAID_STATUSES', () => {
   it('paid·completed만 매출 대상', () => {
     expect(PAID_STATUSES).toEqual(['paid', 'completed']);
@@ -81,6 +87,68 @@ describe('computeRevenueByCategory — 배송비 우선순위(검사 > 도구 > 
     const r = computeRevenueByCategory([order('paid', 6000, [['도서', 20000, 1]])]);
     expect(r.bookShipping).toBe(6000);
     expect(r.book).toBe(26000);
+  });
+});
+
+describe('computeRevenueByCategory — 바우처 귀속 (A13 §⑦)', () => {
+  it('바우처 없는 주문은 추가 반환이 모두 0 (회귀 0)', () => {
+    const r = computeRevenueByCategory([
+      order('paid', 3000, [['검사', 100000, 1]]),
+      order('paid', 0, [['도서', 20000, 1]]),
+    ]);
+    expect(r.voucher).toBe(0);
+    expect(r.testVoucher).toBe(0);
+    expect(r.bookVoucher).toBe(0);
+    expect(r.toolVoucher).toBe(0);
+    expect(r.unclassifiedVoucher).toBe(0);
+    // 버킷 금액(총 매출)은 불변.
+    expect(r.test).toBe(103000);
+    expect(r.book).toBe(20000);
+    expect(r.total).toBe(123000);
+  });
+
+  it('단일 카테고리 — 바우처는 그 버킷에 귀속, 버킷 총액은 불변', () => {
+    const r = computeRevenueByCategory([voucherOrder('paid', 0, 30000, [['도구', 100000, 1]])]);
+    expect(r.tool).toBe(100000); // 총 매출 불변
+    expect(r.toolVoucher).toBe(30000);
+    expect(r.voucher).toBe(30000);
+    // 카드 결제액 = 버킷 − 버킷 바우처
+    expect(r.tool - r.toolVoucher).toBe(70000);
+  });
+
+  it('혼합 주문 — 바우처는 검사 > 도구 > 도서 우선순위로 채운다(귀속 배송비 포함)', () => {
+    // 검사 50,000 + 배송비 3,000 = 검사 버킷 53,000 / 도구 20,000 / 도서 10,000. 바우처 60,000.
+    const r = computeRevenueByCategory([
+      voucherOrder('paid', 3000, 60000, [['검사', 50000, 1], ['도구', 20000, 1], ['도서', 10000, 1]]),
+    ]);
+    expect(r.testVoucher).toBe(53000); // 검사 버킷(배송비 포함) 먼저 가득
+    expect(r.toolVoucher).toBe(7000);  // 남은 7,000은 도구로
+    expect(r.bookVoucher).toBe(0);
+    expect(r.voucher).toBe(60000);
+    // 총 매출은 불변.
+    expect(r.total).toBe(83000);
+  });
+
+  it('바우처가 한 버킷을 넘치면 다음 버킷으로 흘러간다', () => {
+    const r = computeRevenueByCategory([
+      voucherOrder('paid', 0, 25000, [['검사', 20000, 1], ['도서', 30000, 1]]),
+    ]);
+    expect(r.testVoucher).toBe(20000); // 검사 가득
+    expect(r.bookVoucher).toBe(5000);  // 넘친 5,000은 도서로
+    expect(r.voucher).toBe(25000);
+  });
+
+  it('바우처로 전액 결제(카드 0원) 가능 — 바우처 상한 = 주문 매출', () => {
+    const r = computeRevenueByCategory([voucherOrder('paid', 0, 20000, [['검사', 20000, 1]])]);
+    expect(r.testVoucher).toBe(20000);
+    expect(r.test - r.testVoucher).toBe(0); // 카드 0원
+  });
+
+  it('미결제 주문의 바우처는 제외', () => {
+    const r = computeRevenueByCategory([voucherOrder('pending', 0, 10000, [['검사', 50000, 1]])]);
+    expect(r.voucher).toBe(0);
+    expect(r.testVoucher).toBe(0);
+    expect(r.total).toBe(0);
   });
 });
 

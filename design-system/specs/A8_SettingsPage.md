@@ -2,7 +2,8 @@
 
 > 이 시트는 설정 화면의 정보·기능·데이터 구조의 단일 진실 소스다.
 > 시안과 실서비스 구현은 이 시트의 모든 항목을 1:1로 반영해야 한다.
-> 마지막 갱신: 2026-06-29 **동적 배지 기능 폐기 — 소분류는 유지**(건우님 결정). 본 화면 안내 Alert를 "소분류는 상품 관리 화면에서 관리합니다"로 수정(배지 문구 제거). 소분류 마스터 단일 진실 소스 UI는 A6.
+> 마지막 갱신: 2026-11-04 **"이벤트 결제수단" 섹션 신설 구현**(frontend-engineer, 단일 진실 소스 `A13_VoucherEvent.md` §①). `SettingsPage.jsx`에 SectionCard "이벤트 결제수단"(배송비 정책 블록 아래) 추가 — 용어(1~10자)·숫자 버튼(칩+입력, 1~99 정수·중복 불가·최소 1)·단위 버튼(라벨 1~4자+금액 양의 정수 행, 최소 1)·결제완료 창 미리보기. 저장은 기존 "저장하기" 버튼에 합류(`site_settings.voucher_config` jsonb, `normalizeVoucherConfig`로 정리 후 저장). 컬럼 미적용 환경 PGRST204 graceful — 오류 메시지가 가리키는 키(`voucher_config`·`free_shipping_basis`)만 빼고 재시도(while 루프로 확장). 로드 시 `normalizeVoucherConfig(data.voucher_config)`로 초기화(NULL·미적용이면 기본값). 검증 실패 시 저장 버튼 비활성+필드 하단 오류 문구. 장식용 색 인디케이터·그라데이션 없음(CLAUDE.md E). 검증: vitest 471 passed·lint 신규 0·build 성공.
+> 이전 갱신: 2026-06-29 **동적 배지 기능 폐기 — 소분류는 유지**(건우님 결정). 본 화면 안내 Alert를 "소분류는 상품 관리 화면에서 관리합니다"로 수정(배지 문구 제거). 소분류 마스터 단일 진실 소스 UI는 A6.
 > 이전 갱신: 2026-06-29 **소분류·배지 마스터 CRUD를 상품 관리(A6)로 이동 — 본 화면에서 블록 4·5 제거**(건우님 확정 #1). SettingsPage에는 안내 Alert 1줄만 잔존. 마스터 단일 진실 소스 UI는 이제 A6.
 
 ## 참조 파일
@@ -11,6 +12,7 @@
 - 연계 화면: `inpsyt-order-frontend/src/components/GoRedirect.jsx` (`/go` 진입 시 `active_event_slug` 사용)
 - 외부 라이브러리: `qrcode` (QR 생성)
 - DB 스키마: `supabase/migrations/20260401000000_patch_rls_and_create_site_settings.sql` (`site_settings`)
+- 이벤트 결제수단("이벤트 결제수단" 섹션): **`A13_VoucherEvent.md` §①**(단일 진실 소스). `site_settings.voucher_config`(jsonb) + 유틸 `src/utils/voucherConfig.js`(`normalizeVoucherConfig`·`DEFAULT_VOUCHER_CONFIG`).
 - **(2026-06-29 이동) 소분류 마스터 CRUD는 A6 상품 관리 화면 소관** — 건우님 확정으로 SettingsPage→ProductManagementPage 헤더 액션부로 이동. 마스터 단일 진실 소스 UI·데이터 모델(`subcategories`)·다이얼로그·삭제 가드·색 프리셋은 이제 `A6_ProductManagementPage.md` 참조. 본 화면에는 안내 1줄만 잔존. API `src/api/masters.js`. **(2026-06-29) 동적 배지(`badges`)는 폐기** — 코드·UI 모두 제거.
 
 ## 사용자 시나리오

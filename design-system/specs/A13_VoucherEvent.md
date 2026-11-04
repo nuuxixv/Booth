@@ -1,0 +1,188 @@
+# 사양 시트 — 이벤트(바우처·배송비 면제) 결제 처리
+
+> 이 시트는 "이벤트 ON 학회의 결제완료 처리"와 그 금액이 흘러가는 모든 화면의 단일 진실 소스다.
+> 화면별 시트(A1·A2_OrderDetailModal·A4·A8·A11·L2·C3)는 이 시트를 가리키고, 세부는 여기서 정한다.
+> 임의 단순화·통합·생략은 건우님의 명시적 승인 후 이 시트를 먼저 갱신한 다음에만 허용된다.
+
+## 참조 파일
+- 상태 전이 단일 소스: `inpsyt-order-frontend/src/constants/orderStatus.js` (`ALLOWED_TRANSITIONS`, `STATUS_TO_KOREAN`)
+- 주문 목록 상태 칸: `inpsyt-order-frontend/src/components/OrderManagementPage.jsx` (단독 행·합배송 자식 행 `<Select>`, 일괄 변경 `bulk_update_order_status`)
+- 주문 상세 상태·금액: `inpsyt-order-frontend/src/components/OrderSections.jsx` (`applyStatusUpdate`, `handleStatusSelect`, 상품 저장 금액 4필드, 주문 성격 전환)
+- 학회 폼: `inpsyt-order-frontend/src/components/EventOptionalFields.jsx`, `inpsyt-order-frontend/src/utils/eventForm.js`, `inpsyt-order-frontend/src/api/events.js` (`EVENT_DETAIL_COLUMNS`)
+- 설정: `inpsyt-order-frontend/src/components/SettingsPage.jsx` (`site_settings` id=1 단일 행)
+- 집계: `inpsyt-order-frontend/src/utils/revenueByCategory.js`, `depositResolution.js`, `eventDaySales.js`, `components/DashboardPage.jsx`, `components/EventDetailPage.jsx`
+- 고객 주문 상태: `inpsyt-order-frontend/src/components/OrderStatusPage.jsx` (RPC `get_order_by_token`, 최신 정의 `supabase/migrations/20260708000800_group_order_token_co_recipients.sql`)
+- 공용 유틸(신설): `inpsyt-order-frontend/src/utils/voucherConfig.js`, `inpsyt-order-frontend/src/hooks/useVoucherConfig.js`
+- DB: `supabase/migrations/20261104000000_DRAFT_voucher_event.sql` (신설)
+
+## 사용자 시나리오
+부산국제아동도서전처럼 주최 측이 관람객에게 지류 바우처(1천 원권·2천 원권 등)를 나눠 주는 학회가 있다. 고객은 스마트폰으로 주문서를 제출한 뒤, 주문 완료 화면·지류 바우처·카드를 부스 담당자에게 함께 내민다. 담당자는 태블릿 어드민에서 해당 주문의 상태를 눌러 "결제완료"를 고르고, 이벤트 적용 창에서 받은 바우처 금액과 배송비 면제 여부를 입력한다. 창에 표시된 "카드 결제 금액"을 단말기로 결제한 뒤 확정한다. 경영지원팀은 카드 매출을 단말기 정산영수증으로, 바우처 매출을 직접 확인해 따로 잡는다.
+
+## 확정된 결정 (2026-10-29 검토 → 2026-11-04 건우님 확정)
+- [ ] **바우처 = 결제수단**(할인 아님). 주문 매출(`final_payment`)은 그대로 두고, 그 안을 "카드 결제 + 바우처"로 나눈다. 경영지원팀 답변 근거: "부산국제아동도서전 도구 매출(카드) 90,000원 / 도구 매출(바우처) 10,000원".
+- [ ] **배송비 면제 = 실제 할인**. `delivery_fee`를 0으로, `final_payment`를 그만큼 줄인다. 별도 행 없음(배송비 경로로 자연 반영).
+- [ ] 이벤트 적용 여부는 **학회별 토글**(`events.voucher_enabled`). 기존 학회는 전부 OFF = 현재와 동일.
+- [ ] 용어·숫자 버튼·단위 버튼은 **설정 탭에서 전부 지정**(`site_settings.voucher_config`). 기본 용어 "바우처", 숫자 1~5, 단위 만·천·백.
+- [ ] 바우처 입력 방식 = **숫자 버튼 + 단위 버튼 조합**(건우님 제안). 여러 장을 누적 입력한다.
+- [ ] 바우처와 배송비 면제는 **함께 적용 가능**.
+- [ ] 무료배송 기준 판정은 **바우처 적용 전 금액** 기준(바우처는 결제수단이므로 배송비 계산에 관여하지 않는다).
+- [ ] 바우처 합계가 결제할 금액보다 크면 확정 불가(0원 미만 금지). 바우처로 전액 결제(카드 0원)는 허용.
+- [ ] 상태 변경은 **드롭다운 → 클릭 시 모달**. 모달 선택지는 `ALLOWED_TRANSITIONS` 그대로(결제대기 = 결제완료·주문취소, 결제완료 = 결제취소).
+- [ ] 1차 제약: **합배송 주문·일괄 변경에는 바우처를 적용하지 않는다.** 안내만 띄운다.
+- [ ] 결제완료 후 정정: 주문 상세 모달에서 "이벤트 적용 수정"으로 다시 적용한다.
+- [ ] 고객 안내: 이벤트 ON 학회의 **결제대기** 주문 상태 화면에 안내 문구만 표시(고객이 직접 선택하지 않음). 결제완료 후에는 카드·바우처 내역을 보여 준다. 알림톡 문구는 변경하지 않는다(본문에 금액 없음, 재승인 불필요).
+- [ ] 입금결의서·대시보드·학회 상세·현장 보고서: **카테고리 행 = 카드 결제액**, **바우처 = 별도 행**, 합계 = 총 매출(카드 + 바우처).
+- [ ] 혼합 주문의 바우처 카테고리 귀속 = **배송비와 같은 우선순위**(검사 > 도구 > 도서 > 미분류).
+
+## 데이터 모델
+
+### `events`
+- [ ] `voucher_enabled` (boolean, NOT NULL, DEFAULT false) — 이벤트 적용 여부. anon SELECT 컬럼 GRANT 추가(고객 안내 문구 판정용, 무해한 boolean).
+- [ ] 학회 폼 라운드트립: `FORM_FIELDS`·`emptyEvent`(false)·`EVENT_DETAIL_COLUMNS`·목록 select에 전부 반영(2026-06-25 값 소거 사고 방지 규칙).
+
+### `orders`
+- [ ] `voucher_amount` (integer, NULL 허용, DEFAULT 0, CHECK `voucher_amount IS NULL OR voucher_amount >= 0`) — 이 주문에서 받은 바우처 합계(원). 코드에서는 `|| 0`으로 읽는다.
+- [ ] `shipping_waived` (boolean, NULL 허용, DEFAULT false) — 이벤트로 배송비를 면제했는지. 임계 무료배송(`delivery_fee=0`)과 구분하는 표지.
+- [ ] 파생값(저장 안 함): **카드 결제액 = `final_payment - voucher_amount`**.
+- [ ] 불변식: `0 <= voucher_amount <= final_payment`. DB CHECK는 하한만 걸고, 상한은 화면에서 막는다(기존 행 데이터와 무관하게 안전히 적용하기 위함).
+- [ ] 기존 불변식 `final_payment = (total_cost - discount_amount) + delivery_fee`는 유지된다(배송비 면제 시 `delivery_fee=0`).
+
+### `site_settings` (id=1 단일 행)
+- [ ] `voucher_config` (jsonb, NULL 허용, DEFAULT 없음) — NULL이면 코드 기본값.
+  ```json
+  { "label": "바우처",
+    "digits": [1, 2, 3, 4, 5],
+    "units": [ { "label": "만", "value": 10000 }, { "label": "천", "value": 1000 }, { "label": "백", "value": 100 } ] }
+  ```
+- [ ] site_settings는 anon/authenticated 전체 SELECT라 별도 GRANT 불필요. UPDATE는 기존 master 정책 상속.
+
+### RPC `get_order_by_token` (CREATE OR REPLACE)
+- [ ] 직전 최신 정의(20260708000800) 본문을 그대로 두고 필드만 추가: 본인 주문 `voucher_amount`, `shipping_waived`, events 객체에 `voucher_enabled`.
+
+## 공용 유틸 (`utils/voucherConfig.js`, `hooks/useVoucherConfig.js`)
+- [ ] `DEFAULT_VOUCHER_CONFIG` — 위 JSON과 동일.
+- [ ] `normalizeVoucherConfig(raw)` — NULL·깨진 값이면 기본값. label 공백 → "바우처". digits는 1~99 정수만·중복 제거·오름차순, 비면 기본값. units는 label 비지 않고 value 양의 정수인 것만, 비면 기본값.
+- [ ] `formatVoucherEntry(digit, unit)` → `"3천원"`(숫자 + 단위 라벨 + "원"). 금액 = `digit × unit.value`.
+- [ ] `withObjectParticle(word)` → 받침 유무로 "을/를"(예: "바우처를", "쿠폰을"). 한글 외 문자로 끝나면 "를".
+- [ ] `useVoucherConfig()` — `site_settings.voucher_config`를 1회 조회해 정규화 값 반환. 조회 실패·컬럼 미적용이어도 기본값으로 동작(graceful).
+
+## 액션·기능
+
+### ① 설정 탭 — "이벤트 결제수단" 섹션 (A8)
+- [ ] 섹션 제목 "이벤트 결제수단", 설명 "이벤트 적용 학회에서 결제완료 처리 시 쓰는 결제수단과 금액 버튼입니다."
+- [ ] 필드 "용어"(TextField, 1~10자, 기본 "바우처"). 설명 "결제완료 창·고객 안내·입금결의서에 표시됩니다."
+- [ ] 필드 "숫자 버튼" — 칩 목록(× 삭제) + 숫자 입력·추가. 1~99 정수, 중복 불가, 최소 1개.
+- [ ] 필드 "단위 버튼" — 행 목록 [라벨 TextField][금액(원) 숫자 TextField][삭제] + "단위 추가". 라벨 1~4자, 금액 양의 정수, 최소 1개.
+- [ ] 미리보기 — 결제완료 창에 보일 숫자 버튼 줄·단위 버튼 줄을 그대로 렌더(누르기 불가).
+- [ ] 저장은 페이지의 기존 "저장" 버튼에 합류(`handleSave` payload에 `voucher_config` 추가). 컬럼 미적용 환경 PGRST204 시 해당 키 빼고 재시도하는 기존 graceful 패턴을 그대로 따른다.
+- [ ] 검증 실패 시 저장 버튼 비활성 + 필드 하단 오류 문구.
+
+### ② 학회 폼 — "이벤트 적용" 토글 (A11 생성·L2 개요 편집 공용 `EventOptionalFields`)
+- [ ] 1행 "판매 대분류 · 할인율"의 할인율 옆(같은 행, md 3열 또는 할인율 칸 아래)에 Switch "이벤트 적용".
+- [ ] 보조 문구 "켜면 결제완료 처리 때 {용어}·배송비 면제를 적용하는 창이 뜹니다." ({용어}=설정값)
+- [ ] 값 `voucher_enabled`(boolean). 학회 진행 중에 바꿔도 이미 결제완료된 주문에는 영향 없음(적용 시점에 주문에 저장되므로).
+- [ ] L2 개요 읽기 화면: 할인율 표시 옆에 "이벤트 적용 켜짐"일 때만 표시(꺼짐이면 표시 안 함 — 기존 화면 회귀 0).
+
+### ③ 주문 목록 — 상태 칸 클릭 → 상태 변경 모달 (A1)
+- [ ] 단독 행·합배송 자식 행의 `<Select>` 드롭다운을 **상태 배지 버튼**으로 바꾼다. 누르면 "상태 변경" 모달.
+- [ ] 전이 가능 상태가 없는 행(`ALLOWED_TRANSITIONS[status]`가 빈 배열)은 지금처럼 배지만(클릭 불가).
+- [ ] 모달 내용: 주문번호 · 고객명 · 현재 상태 배지 · 전이 버튼 목록(`ALLOWED_TRANSITIONS` 순서, 라벨 `STATUS_TO_KOREAN`). 주문취소·결제취소 버튼은 error 색.
+- [ ] **이벤트 OFF 학회, 또는 합배송 자식**: 버튼을 누르면 즉시 적용(현행 `handleStatusChange`/`handleGroupChildStatusChange` 경로 그대로 — 대표 위임 규칙 보존).
+- [ ] **합배송 자식 + 이벤트 ON**: 결제완료 버튼 아래 안내 "합배송 주문은 {용어}를 적용할 수 없어요. 결제완료만 처리됩니다."
+- [ ] **이벤트 ON 학회 단독 주문에서 결제완료**: 상태 변경 모달 → ④ 이벤트 적용 모달로 넘어간다(상태 변경은 ④에서 확정 시에만 일어난다).
+- [ ] 일괄 변경(체크박스 + 상태 선택 + 적용): 선택 주문 중 이벤트 ON 학회 주문이 있고 결제완료로 바꾸려 하면, 적용 전에 확인 창 "이벤트 적용 학회 주문 N건은 {용어} 없이 결제완료됩니다. 계속할까요?" [취소][계속]. 그 외는 현행 동작.
+
+### ④ 이벤트 적용 모달 (결제완료 처리) — 신규 컴포넌트 `VoucherPaymentModal`
+- [ ] 제목 "결제완료 처리" / 부제 "주문 #{id} · {고객명}".
+- [ ] 금액 요약 블록(위→아래):
+  - "주문 금액" = 현재 `final_payment`
+  - "배송비 면제" = `−{delivery_fee}` (면제 켰을 때만)
+  - "{용어}" = `−{바우처 합계}` (0이면 숨김)
+  - 구분선
+  - **"카드 결제 금액"** = 주문 금액 − 배송비 면제액 − 바우처 합계 (가장 크게, 단말기에 찍을 금액)
+- [ ] "배송비 면제" 토글 버튼 — 바우처 버튼들과 **다른 색**(outlined secondary 계열)으로 구분. 켜짐/꺼짐 상태가 보이게. 배송비가 0원인 주문(현장수령·임계 무료)은 비활성 + 문구 "배송비 없음".
+- [ ] {용어} 입력:
+  - 숫자 버튼 줄(설정 `digits`) — 누르면 선택 강조(한 개만).
+  - 단위 버튼 줄(설정 `units`) — 누르면 `선택 숫자 × 단위 금액`이 한 건 추가되고 숫자 선택이 풀린다. **숫자를 고르지 않고 단위만 누르면 1 × 단위**로 추가.
+  - 추가된 건은 칩 목록("3천원" ×)으로 쌓인다. 같은 금액 반복 가능. × 로 개별 삭제, "초기화"로 전체 삭제.
+  - 합계 표시 "{용어} 합계 {N}원".
+- [ ] 검증: 바우처 합계 > (주문 금액 − 배송비 면제액)이면 오류 문구 "{용어} 금액이 결제할 금액보다 많아요." + 확정 버튼 비활성.
+- [ ] 버튼: [취소] [결제완료 처리]. 바우처 0원·면제 없음으로도 확정 가능(= 일반 결제완료).
+- [ ] 확정 시 **한 번의 update**로 저장(상태만 바뀌고 바우처가 빠지는 일 방지):
+  `{ status: 'paid', voucher_amount, shipping_waived, delivery_fee, final_payment }`
+  — 면제 시 `delivery_fee = 0`, `final_payment = 기존 final_payment − 기존 delivery_fee`. 면제 안 하면 두 값 그대로.
+  — `.eq('id', id).eq('status', 'pending')` 조건 + 반환 행 확인. 0행이면 "다른 화면에서 이미 상태가 바뀌었어요. 목록을 새로고침합니다." 후 새로고침.
+- [ ] 확정 후: 성공 알림 → 현행과 동일하게 알림톡 자동 발송(현장수령 제외) → 목록/상세 갱신.
+- [ ] 권한: `orders:edit`.
+
+### ⑤ 주문 상세 모달 (A2_OrderDetailModal)
+- [ ] 상태 `<Select>`(전체 상태 자유 선택, 관리자 정정 통로)는 유지한다. 단, **이벤트 ON 학회 + 비합배송 + 결제대기 → 결제완료**를 고르면 즉시 적용하지 않고 ④ 모달을 연다. 모달을 취소하면 선택값을 원래 상태로 되돌린다.
+- [ ] 금액 영역: `voucher_amount > 0`이면 "{용어} −N원" 줄과 "카드 결제 M원" 줄 추가. `shipping_waived`이면 배송비 줄에 "면제" 표시.
+- [ ] **"이벤트 적용 수정"** 버튼 — 이벤트 ON 학회 + 결제완료 + 비합배송 주문에서만. ④ 모달을 **수정 모드**로 연다(제목 "이벤트 적용 수정", 현재 바우처 합계를 칩 1건 "{N}원"으로, 면제 여부를 현재값으로 채움, 상태는 바꾸지 않음, 알림톡 재발송 없음).
+  - 면제 해제 시 배송비를 다시 계산해 복원한다(기존 `computeShipping(is_on_site_sale)` 경로).
+  - update 조건은 `.eq('status', 'paid')`.
+- [ ] 상품 저장(금액 4필드 재계산) 시: `shipping_waived`면 배송비를 0으로 유지. 재계산된 `final_payment`가 `voucher_amount`보다 작아지면 저장 차단 + 오류 "{용어} 금액보다 결제 금액이 작아져요. 이벤트 적용을 먼저 수정해 주세요."
+- [ ] 주문 성격 전환(현장수령↔배송) 시에도 `shipping_waived`면 배송비 0 유지.
+- [ ] 합배송 연계(연계 미리보기·연계 실행): `voucher_amount > 0` 또는 `shipping_waived`인 주문은 연계 대상에서 막고 안내 "이벤트가 적용된 주문은 합배송으로 묶을 수 없어요."
+
+### ⑥ 고객 주문 상태 화면 (C3)
+- [ ] 결제대기 + `events.voucher_enabled`: 금액 영역 아래 안내 "※ {용어}{을/를} 사용하시면 결제할 때 담당자에게 {용어}{을/를} 함께 내 주세요."
+- [ ] `voucher_amount > 0`(결제완료 이후): 결제 금액 아래 "카드 결제 M원 · {용어} N원".
+- [ ] `shipping_waived`: 배송비 줄에 "면제".
+- [ ] 이벤트 OFF·바우처 0원: 기존 화면과 동일(회귀 0).
+
+### ⑦ 집계 — `computeRevenueByCategory` 확장
+- [ ] 기존 반환값(`test·book·tool·unclassified·total`·배송비 3종)은 **의미 그대로**(총 매출, 바우처 포함). 기존 소비처 회귀 0.
+- [ ] 추가 반환: `testVoucher·bookVoucher·toolVoucher·unclassifiedVoucher·voucher`(합계).
+- [ ] 귀속: 주문별 `v = min(voucher_amount, 그 주문 매출)`을 **검사 → 도구 → 도서 → 미분류** 순으로, 각 버킷의 그 주문 금액(귀속 배송비 포함)만큼 채우고 남으면 다음 버킷으로.
+- [ ] 결제완료(`PAID_STATUSES`)만 — 기존 규칙과 동일.
+- [ ] 카드 결제액 = 버킷 − 버킷 바우처(소비처에서 계산).
+
+### ⑧ 입금결의서 (`depositResolution.js`)
+- [ ] 바우처 합계 0원: **현재 출력 그대로**(행 9~11 "도서/검사/도구 매출", 12~15 비움, R16 합계).
+- [ ] 바우처 합계 > 0: 카테고리마다 "(카드)" 행 → 그 카테고리 바우처 > 0이면 바로 아래 "({용어})" 행. 순서 도서·검사·도구. 카드 행 3개는 0원이어도 기재(기존 생략 금지 규칙), 바우처 행은 0원이면 생략. 행 9부터 채우고 최대 6행(9~14), 남는 행(~15)은 비움.
+  - 적요 예: `{기간} {학회} {행사} 도구 매출(카드)` / `{기간} {학회} {행사} 도구 매출(바우처)`
+  - 금액: 카드 행 = 버킷 − 버킷 바우처, 바우처 행 = 버킷 바우처.
+- [ ] C5 한글 금액·D6·R16 합계 = 총 매출(카드 + 바우처) — 현재와 같은 `total`.
+
+### ⑨ 대시보드 매출 KPI (A4) · 학회 상세 매출 (L2)
+- [ ] "총 매출액" hero = 현재와 동일(`total`).
+- [ ] 검사·도서·도구 카드 금액 = **카드 결제액**(버킷 − 버킷 바우처). 라벨 "(배송비 N원 포함)" 유지. 노출 조건은 총 매출 버킷 > 0(바우처로 전액 결제된 카테고리도 카드가 사라지지 않게).
+- [ ] 바우처 합계 > 0이면 카드 하나 추가: "{용어} 결제" · 금액 = `voucher`. 0이면 렌더 안 함(기존 화면 회귀 0).
+- [ ] 대시보드 매출 조회 select에 `voucher_amount` 추가.
+
+### ⑩ 현장 보고서 "0. 판매" 블록 (`eventDaySales.js`)
+- [ ] 바우처 > 0인 블록: 검사·도서·도구 줄 금액 = 카드 결제액, "합계" 줄 위에 "{용어} 결제: N원" 줄 추가. 합계 = 총 매출.
+- [ ] 바우처 0이면 현재 출력과 글자 단위로 동일.
+- [ ] 블록 교체 정규식(`SALES_LINE`)에 `/^\s*\S+\s*결제\s*:/` 추가(용어가 바뀌어도 교체 범위 유지).
+- [ ] `getOrdersForEventRevenue` select에 `voucher_amount` 추가.
+
+## 권한별 차이
+- master: 설정 탭 편집 + 아래 전부.
+- `orders:edit`: 상태 변경 모달·이벤트 적용 모달·이벤트 적용 수정.
+- `events:edit`: 학회 폼 이벤트 토글.
+- 권한 없음: 상태 배지는 보이되 클릭 불가(현행 `disabled`와 동일).
+
+## 배포 순서 (필수)
+1. 건우님이 SQL Editor에서 `20261104000000_DRAFT_voucher_event.sql` 적용(컬럼 3개·GRANT·RPC 재정의).
+2. 검증 쿼리 확인 후 PR 머지(Vercel 자동 배포). **마이그레이션 전에 머지하면 대시보드·학회 상세 조회가 `voucher_amount` 미존재로 실패한다.**
+3. Edge Function 변경 없음(create-order·send-alimtalk 무변경).
+
+## 빈 상태·로딩·오류 처리
+- 설정 조회 실패: 기본 설정(바우처·1~5·만천백)으로 동작.
+- 이벤트 적용 모달 저장 실패: 오류 알림 + 모달 유지(입력값 보존).
+- 동시 처리(이미 결제완료됨): ④ 확정 규칙대로 새로고침.
+
+## 테스트 기준 (자동 테스트로 고정)
+- [ ] `normalizeVoucherConfig`: NULL·빈 label·잘못된 digits/units → 기본값 또는 걸러짐.
+- [ ] `withObjectParticle`: 바우처→를, 쿠폰→을, ABC→를.
+- [ ] 바우처 입력 누적: 숫자 3 + 천 → 3,000 / 단위만 백 → 100 / 삭제·초기화.
+- [ ] 검증: 바우처 합계 > 결제할 금액 → 확정 불가, 같으면 가능(카드 0원).
+- [ ] 확정 payload: 면제 시 delivery_fee 0·final_payment 감소, 미면제 시 그대로.
+- [ ] `computeRevenueByCategory`: 바우처 없는 기존 테스트 전부 통과(회귀 0) + 단일 카테고리·혼합(검사 우선)·버킷 초과 시 다음 버킷 넘김·미결제 제외.
+- [ ] 입금결의서 행 구성(순수 함수로 분리해 테스트): 바우처 0 → 기존 3행 / 도구만 바우처 → 도서(카드)·검사(카드)·도구(카드)·도구(바우처).
+- [ ] `buildSalesBlock`: 바우처 0이면 기존 출력 동일, 바우처 있으면 "{용어} 결제" 줄. `replaceSalesBlock`이 그 줄까지 교체.
+- [ ] 주문 목록 상태 모달: 결제대기 → 결제완료·주문취소 버튼, 이벤트 ON 단독 주문 결제완료 → 이벤트 적용 모달.
+
+## 변경 이력
+- 2026-11-04: 신설 — 이벤트(바우처·배송비 면제) 결제 처리 기획 확정(2026-10-29 CTO·CPO 검토, 경영지원팀 입금결의서 답변 반영, 건우님 결정: 바우처=결제수단·배송비 우선순위 귀속·안내 문구만·용어/숫자/단위 설정 탭 지정·숫자+단위 조합 입력).
