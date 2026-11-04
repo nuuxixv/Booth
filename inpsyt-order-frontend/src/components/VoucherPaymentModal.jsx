@@ -10,10 +10,9 @@ import {
   Divider,
   Typography,
   CircularProgress,
+  Switch,
   useTheme,
 } from '@mui/material';
-import LocalShippingIcon from '@mui/icons-material/LocalShipping';
-import { PriceBlock } from './ui';
 import { calcShippingFee } from '../constants/shipping';
 import { MAX_VOUCHER_DIGITS } from '../utils/voucherConfig';
 import {
@@ -26,9 +25,19 @@ import {
 } from '../utils/voucherPayment';
 
 // 이벤트 적용 모달 (결제완료 처리 / 이벤트 적용 수정) — 사양 A13 §④·§⑤.
-//  - 바우처(결제수단) 숫자+단위 조합 입력 + 배송비 면제 토글.
+//  - 바우처(결제수단) 숫자+단위 조합 입력 + 배송비 면제 스위치.
 //  - 확정은 한 번의 update payload를 상위(onConfirm)에 넘긴다. status 동봉·.eq 조건은 상위가 담당.
 //  - onConfirm은 성공 시 true를 반환하면 모달을 닫고, 실패 시 false로 입력값을 보존한다.
+
+// 소제목 줄 — 왼쪽 소제목, 오른쪽 금액(또는 컨트롤). 세 소제목이 같은 위계를 갖도록 한 곳에서 그린다.
+const SectionHeader = ({ title, amount, sx }) => (
+  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, minHeight: 32, ...sx }}>
+    <Typography variant="subtitle2">{title}</Typography>
+    {typeof amount === 'string' ? (
+      <Typography variant="body2" sx={{ fontFeatureSettings: '"tnum" 1', whiteSpace: 'nowrap' }}>{amount}</Typography>
+    ) : amount}
+  </Box>
+);
 
 const VoucherPaymentModal = ({ open, onClose, order, config, settings, mode = 'create', onConfirm }) => {
   const theme = useTheme();
@@ -104,36 +113,17 @@ const VoucherPaymentModal = ({ open, onClose, order, config, settings, mode = 'c
         <Typography variant="body2" color="text.secondary">주문 #{order.id} · {order.customer_name || '-'}</Typography>
       </DialogTitle>
       <DialogContent dividers>
-        {/* 시선 순서 = 계산 순서: 주문 금액 → 배송비 면제 → 바우처 → 카드 결제 금액(2026-11-04 건우님 피드백) */}
-        <PriceBlock rows={[{ label: '주문 금액', value: orderAmount }]} />
+        {/* 위계(2026-11-04 건우님 피드백): 소제목 3개(주문 금액·{용어}·배송비 면제)를 같은 급으로,
+            최종 금액만 한 단계 크게. 금액은 각 소제목 줄 오른쪽. */}
+        <SectionHeader title="주문 금액" amount={`${orderAmount.toLocaleString()}원`} />
 
-        {/* 배송비 면제 토글 — 바우처 버튼과 다른 색(secondary). 차감액은 같은 줄 오른쪽. */}
-        <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
-          <Button
-            variant={shippingWaived ? 'contained' : 'outlined'}
-            color="secondary"
-            onClick={() => setShippingWaived((v) => !v)}
-            disabled={waiveDisabled}
-            startIcon={<LocalShippingIcon />}
-            sx={{ minHeight: 44 }}
-          >
-            배송비 면제 {shippingWaived ? '켜짐' : '꺼짐'}
-          </Button>
-          {waiveDisabled ? (
-            <Typography variant="caption" color="text.secondary">배송비 없음</Typography>
-          ) : shippingWaived && (
-            <Typography variant="body2" sx={amountSx}>−{waived.toLocaleString()}원</Typography>
-          )}
-        </Box>
-
-        {/* 바우처 입력 — 숫자 버튼 + 단위 버튼 조합. 합계(차감액)는 제목 줄 오른쪽. */}
+        {/* {용어} 입력 — 숫자 버튼 + 단위 버튼 조합. 합계(차감액)는 소제목 줄 오른쪽. */}
         <Box sx={{ mt: 2.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', mb: 1 }}>
-            <Typography variant="subtitle2">{config.label}</Typography>
-            {voucherSum > 0 && (
-              <Typography variant="body2" sx={amountSx}>−{voucherSum.toLocaleString()}원</Typography>
-            )}
-          </Box>
+          <SectionHeader
+            title={config.label}
+            amount={voucherSum > 0 ? `−${voucherSum.toLocaleString()}원` : null}
+            sx={{ mb: 1 }}
+          />
           <Box sx={{ display: 'grid', gridTemplateColumns: `repeat(${DIGIT_COLUMNS}, 1fr)`, gap: 1, mb: 1 }}>
             {config.digits.map((d) => (
               <Button
@@ -176,9 +166,36 @@ const VoucherPaymentModal = ({ open, onClose, order, config, settings, mode = 'c
           )}
         </Box>
 
-        {/* 최종 — 단말기에 찍을 금액 */}
+        {/* 배송비 면제 — 소제목 줄에 스위치. 켜면 차감액, 배송비가 없으면 비활성 + 안내. */}
+        <SectionHeader
+          title="배송비 면제"
+          sx={{ mt: 2.5 }}
+          amount={
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              {waiveDisabled ? (
+                <Typography variant="caption" color="text.secondary">배송비 없음</Typography>
+              ) : shippingWaived && (
+                <Typography variant="body2" sx={amountSx}>−{waived.toLocaleString()}원</Typography>
+              )}
+              <Switch
+                checked={shippingWaived}
+                onChange={(e) => setShippingWaived(e.target.checked)}
+                disabled={waiveDisabled}
+                inputProps={{ 'aria-label': '배송비 면제' }}
+                sx={{ mr: -1 }}
+              />
+            </Box>
+          }
+        />
+
+        {/* 최종 — 단말기에 찍을 금액. 소제목보다 한 단계 큰 위계. */}
         <Divider sx={{ mt: 2, mb: 1.5 }} />
-        <PriceBlock totalLabel="카드 결제 금액" totalValue={cardAmount} totalColor={theme.status.paid} />
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 2 }}>
+          <Typography variant="h5">카드 결제 금액</Typography>
+          <Typography variant="h4" sx={{ ...amountSx, color: theme.status.paid }}>
+            {cardAmount.toLocaleString()}원
+          </Typography>
+        </Box>
       </DialogContent>
       <DialogActions sx={{ p: 2 }}>
         <Button onClick={onClose} disabled={submitting} sx={{ minHeight: 44 }}>취소</Button>
