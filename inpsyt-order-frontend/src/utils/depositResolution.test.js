@@ -13,18 +13,38 @@ const rev = (over = {}) => ({
   ...over,
 });
 
-describe('buildDepositRows — 바우처 0 (현행 유지)', () => {
-  it('도서·검사·도구 "매출" 3행, 0원이어도 기재', () => {
+describe('buildDepositRows — 바우처 0', () => {
+  it('팔린 대분류만 "매출" 행, 0원 대분류는 생략', () => {
     const rows = buildDepositRows(rev({ book: 20000, test: 100000, tool: 0 }), PREFIX, SOCIETY);
     expect(rows).toEqual([
       { summary: `${PREFIX} 도서 매출`, counterparty: SOCIETY, amount: 20000 },
       { summary: `${PREFIX} 검사 매출`, counterparty: SOCIETY, amount: 100000 },
-      { summary: `${PREFIX} 도구 매출`, counterparty: SOCIETY, amount: 0 },
     ]);
+  });
+
+  it('도구만 팔린 행사 → 도구 행 1개', () => {
+    const rows = buildDepositRows(rev({ tool: 450000 }), PREFIX, SOCIETY);
+    expect(rows).toEqual([{ summary: `${PREFIX} 도구 매출`, counterparty: SOCIETY, amount: 450000 }]);
+  });
+
+  it('매출 0건이면 3행 0원(양식 비지 않게)', () => {
+    const rows = buildDepositRows(rev(), PREFIX, SOCIETY);
+    expect(rows.map((r) => r.summary)).toEqual([
+      `${PREFIX} 도서 매출`, `${PREFIX} 검사 매출`, `${PREFIX} 도구 매출`,
+    ]);
+    expect(rows.every((r) => r.amount === 0)).toBe(true);
   });
 });
 
 describe('buildDepositRows — 바우처 > 0 (카드/바우처 분리)', () => {
+  it('도구만 팔리고 바우처 사용 → 도구(카드)·도구(바우처) 2행', () => {
+    const rows = buildDepositRows(rev({ tool: 100000, toolVoucher: 10000, voucher: 10000 }), PREFIX, SOCIETY);
+    expect(rows).toEqual([
+      { summary: `${PREFIX} 도구 매출(카드)`, counterparty: SOCIETY, amount: 90000 },
+      { summary: `${PREFIX} 도구 매출(바우처)`, counterparty: SOCIETY, amount: 10000 },
+    ]);
+  });
+
   it('도구만 바우처 → 도서(카드)·검사(카드)·도구(카드)·도구(바우처)', () => {
     const rows = buildDepositRows(
       rev({ book: 20000, test: 100000, tool: 50000, toolVoucher: 10000, voucher: 10000 }),
@@ -38,16 +58,14 @@ describe('buildDepositRows — 바우처 > 0 (카드/바우처 분리)', () => {
     ]);
   });
 
-  it('카드 행은 0원이어도 기재, 바우처 행은 0원이면 생략', () => {
+  it('팔린 대분류의 카드 행은 0원이어도 기재, 안 팔린 대분류는 생략', () => {
     const rows = buildDepositRows(
       rev({ book: 0, test: 30000, tool: 0, testVoucher: 30000, voucher: 30000 }),
       PREFIX, SOCIETY,
     );
     expect(rows).toEqual([
-      { summary: `${PREFIX} 도서 매출(카드)`, counterparty: SOCIETY, amount: 0 },
       { summary: `${PREFIX} 검사 매출(카드)`, counterparty: SOCIETY, amount: 0 }, // 전액 바우처 → 카드 0원
       { summary: `${PREFIX} 검사 매출(바우처)`, counterparty: SOCIETY, amount: 30000 },
-      { summary: `${PREFIX} 도구 매출(카드)`, counterparty: SOCIETY, amount: 0 },
     ]);
   });
 

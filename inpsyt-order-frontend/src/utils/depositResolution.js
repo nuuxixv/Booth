@@ -47,9 +47,11 @@ function formatEventDateRange(startDate, endDate) {
 }
 
 // 적요 행 구성(순수 함수 — 바우처 분기 테스트용). A13 §⑧.
-//  - 바우처 0: 현행 그대로 도서·검사·도구 "매출" 3행(0원이어도 기재).
-//  - 바우처 > 0: 카테고리마다 "(카드)" 행 + 그 카테고리 바우처 > 0이면 바로 아래 "({용어})" 행.
-//    순서 도서·검사·도구. 카드 행은 0원이어도 기재, 바우처 행은 0원이면 생략. 카드 행 = 버킷 − 버킷 바우처.
+//  - 실제로 팔린 대분류(버킷 > 0)만 적는다. 학회 개요의 판매 대분류 선택이 아니라 판매 실적 기준
+//    (어드민 수기 주문으로 다른 대분류를 팔 수 있음, 2026-11-04 건우님 결정). 매출 0건이면 3행 0원.
+//  - 바우처 0: 팔린 대분류마다 "매출" 1행.
+//  - 바우처 > 0: 팔린 대분류마다 "(카드)" 행 + 그 대분류 바우처 > 0이면 바로 아래 "({용어})" 행.
+//    순서 도서·검사·도구. 카드 행은 0원이어도 기재(전액 바우처), 바우처 행은 0원이면 생략. 카드 행 = 버킷 − 버킷 바우처.
 // 반환: [{ summary, counterparty, amount }] (행 9부터 순서대로). 최대 6행(도서·검사·도구 × 카드+바우처).
 export function buildDepositRows(revenue, prefix, society, voucherLabel = '바우처') {
   const cats = [
@@ -59,12 +61,16 @@ export function buildDepositRows(revenue, prefix, society, voucherLabel = '바�
   ];
   const row = (summary, amount) => ({ summary, counterparty: society, amount });
 
+  const sold = cats.filter((c) => c.bucket > 0);
+  // 매출 0건 — 양식이 비지 않도록 기존처럼 3행 0원.
+  if (sold.length === 0) return cats.map((c) => row(`${prefix} ${c.name} 매출`, 0));
+
   if (!((revenue.voucher || 0) > 0)) {
-    return cats.map((c) => row(`${prefix} ${c.name} 매출`, c.bucket));
+    return sold.map((c) => row(`${prefix} ${c.name} 매출`, c.bucket));
   }
 
   const rows = [];
-  for (const c of cats) {
+  for (const c of sold) {
     rows.push(row(`${prefix} ${c.name} 매출(카드)`, c.bucket - c.voucher));
     if (c.voucher > 0) rows.push(row(`${prefix} ${c.name} 매출(${voucherLabel})`, c.voucher));
   }
