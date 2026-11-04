@@ -44,6 +44,10 @@ describe('normalizeVoucherConfig', () => {
     // 전부 걸러지면 기본값
     expect(normalizeVoucherConfig({ units: [] }).units).toEqual(DEFAULT_VOUCHER_CONFIG.units);
   });
+
+  it('숫자 버튼은 최대 5개(오름차순 앞 5개)', () => {
+    expect(normalizeVoucherConfig({ digits: [7, 1, 2, 3, 4, 5, 6] }).digits).toEqual([1, 2, 3, 4, 5]);
+  });
 });
 
 describe('formatVoucherEntry', () => {

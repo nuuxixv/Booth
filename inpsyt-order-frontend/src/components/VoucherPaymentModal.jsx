@@ -7,6 +7,7 @@ import {
   Box,
   Button,
   Chip,
+  Divider,
   Typography,
   CircularProgress,
   useTheme,
@@ -14,6 +15,7 @@ import {
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import { PriceBlock } from './ui';
 import { calcShippingFee } from '../constants/shipping';
+import { MAX_VOUCHER_DIGITS } from '../utils/voucherConfig';
 import {
   appendVoucherEntry,
   removeVoucherEntry,
@@ -90,9 +92,10 @@ const VoucherPaymentModal = ({ open, onClose, order, config, settings, mode = 'c
     if (ok) onClose();
   };
 
-  const summaryRows = [{ label: '주문 금액', value: orderAmount }];
-  if (shippingWaived) summaryRows.push({ label: '배송비 면제', value: -waived });
-  if (voucherSum > 0) summaryRows.push({ label: config.label, value: -voucherSum });
+  // 숫자 버튼 칸 수 고정(최대 5개, normalizeVoucherConfig) — 개수가 적어도 버튼 너비가 같다.
+  // 단위 버튼은 같은 줄 너비를 단위 개수로 나눠 숫자보다 넓게 쓴다(2026-11-04 건우님 피드백).
+  const DIGIT_COLUMNS = MAX_VOUCHER_DIGITS;
+  const amountSx = { fontFeatureSettings: '"tnum" 1', whiteSpace: 'nowrap' };
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
@@ -101,16 +104,11 @@ const VoucherPaymentModal = ({ open, onClose, order, config, settings, mode = 'c
         <Typography variant="body2" color="text.secondary">주문 #{order.id} · {order.customer_name || '-'}</Typography>
       </DialogTitle>
       <DialogContent dividers>
-        {/* 금액 요약 — 카드 결제 금액이 단말기에 찍을 금액 */}
-        <PriceBlock
-          rows={summaryRows}
-          totalLabel="카드 결제 금액"
-          totalValue={cardAmount}
-          totalColor={theme.status.paid}
-        />
+        {/* 시선 순서 = 계산 순서: 주문 금액 → 배송비 면제 → 바우처 → 카드 결제 금액(2026-11-04 건우님 피드백) */}
+        <PriceBlock rows={[{ label: '주문 금액', value: orderAmount }]} />
 
-        {/* 배송비 면제 토글 — 바우처 버튼과 다른 색(secondary) */}
-        <Box sx={{ mt: 2 }}>
+        {/* 배송비 면제 토글 — 바우처 버튼과 다른 색(secondary). 차감액은 같은 줄 오른쪽. */}
+        <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
           <Button
             variant={shippingWaived ? 'contained' : 'outlined'}
             color="secondary"
@@ -121,34 +119,41 @@ const VoucherPaymentModal = ({ open, onClose, order, config, settings, mode = 'c
           >
             배송비 면제 {shippingWaived ? '켜짐' : '꺼짐'}
           </Button>
-          {waiveDisabled && (
-            <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>배송비 없음</Typography>
+          {waiveDisabled ? (
+            <Typography variant="caption" color="text.secondary">배송비 없음</Typography>
+          ) : shippingWaived && (
+            <Typography variant="body2" sx={amountSx}>−{waived.toLocaleString()}원</Typography>
           )}
         </Box>
 
-        {/* 바우처 입력 — 숫자 버튼 + 단위 버튼 조합 */}
-        <Box sx={{ mt: 2 }}>
-          <Typography variant="subtitle2" sx={{ mb: 1 }}>{config.label} 입력</Typography>
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1 }}>
+        {/* 바우처 입력 — 숫자 버튼 + 단위 버튼 조합. 합계(차감액)는 제목 줄 오른쪽. */}
+        <Box sx={{ mt: 2.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', mb: 1 }}>
+            <Typography variant="subtitle2">{config.label}</Typography>
+            {voucherSum > 0 && (
+              <Typography variant="body2" sx={amountSx}>−{voucherSum.toLocaleString()}원</Typography>
+            )}
+          </Box>
+          <Box sx={{ display: 'grid', gridTemplateColumns: `repeat(${DIGIT_COLUMNS}, 1fr)`, gap: 1, mb: 1 }}>
             {config.digits.map((d) => (
               <Button
                 key={d}
                 variant={selectedDigit === d ? 'contained' : 'outlined'}
                 onClick={() => setSelectedDigit((prev) => (prev === d ? null : d))}
-                sx={{ minWidth: 48, minHeight: 44 }}
+                sx={{ minWidth: 0, minHeight: 44 }}
               >
                 {d}
               </Button>
             ))}
           </Box>
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: `repeat(${config.units.length}, 1fr)`, gap: 1 }}>
             {config.units.map((u) => (
               <Button
                 key={u.label}
                 variant="outlined"
                 color="primary"
                 onClick={() => handleAddUnit(u)}
-                sx={{ minWidth: 48, minHeight: 44 }}
+                sx={{ minWidth: 0, minHeight: 44 }}
               >
                 {u.label}
               </Button>
@@ -164,15 +169,16 @@ const VoucherPaymentModal = ({ open, onClose, order, config, settings, mode = 'c
             </Box>
           )}
 
-          <Typography variant="body2" sx={{ mt: 1.5, fontWeight: 600 }}>
-            {config.label} 합계 {voucherSum.toLocaleString()}원
-          </Typography>
           {!valid && (
-            <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5 }}>
+            <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1 }}>
               {config.label} 금액이 결제할 금액보다 많아요.
             </Typography>
           )}
         </Box>
+
+        {/* 최종 — 단말기에 찍을 금액 */}
+        <Divider sx={{ mt: 2, mb: 1.5 }} />
+        <PriceBlock totalLabel="카드 결제 금액" totalValue={cardAmount} totalColor={theme.status.paid} />
       </DialogContent>
       <DialogActions sx={{ p: 2 }}>
         <Button onClick={onClose} disabled={submitting} sx={{ minHeight: 44 }}>취소</Button>

@@ -39,7 +39,7 @@ import { supabase } from '../supabaseClient';
 import { useNotification } from '../hooks/useNotification';
 import { PageHeader, SectionCard, ActionSlot, InfoRow } from './ui';
 import { sortEventsForDropdown, groupEventsForDropdown, formatEventStartDate } from '../utils/eventSort';
-import { DEFAULT_VOUCHER_CONFIG, normalizeVoucherConfig } from '../utils/voucherConfig';
+import { DEFAULT_VOUCHER_CONFIG, MAX_VOUCHER_DIGITS, normalizeVoucherConfig } from '../utils/voucherConfig';
 
 // 이벤트 결제수단 설정 검증(A13 §①) — 저장 가능하면 null, 아니면 오류 문구. 숫자 버튼은 추가 시
 // 이미 1~99 정수·중복 제거되므로 여기선 개수만 본다. 단위는 편집 중 빈 값이 가능해 값까지 본다.
@@ -47,6 +47,7 @@ const validateVoucherConfig = (cfg) => {
   const label = (cfg.label || '').trim();
   if (label.length < 1 || label.length > 10) return '용어는 1~10자로 입력하세요.';
   if (!cfg.digits?.length) return '숫자 버튼을 1개 이상 추가하세요.';
+  if (cfg.digits.length > MAX_VOUCHER_DIGITS) return `숫자 버튼은 최대 ${MAX_VOUCHER_DIGITS}개까지예요.`;
   if (!cfg.units?.length) return '단위 버튼을 1개 이상 추가하세요.';
   for (const u of cfg.units) {
     const ul = (u.label || '').trim();
@@ -195,8 +196,10 @@ const SettingsPage = () => {
     }
   };
 
-  // 이벤트 결제수단 — 숫자 버튼 추가(1~99 정수·중복 불가·오름차순).
+  // 이벤트 결제수단 — 숫자 버튼 추가(1~99 정수·중복 불가·오름차순·최대 5개).
+  const digitsFull = voucherConfig.digits.length >= MAX_VOUCHER_DIGITS;
   const addDigit = () => {
+    if (digitsFull) return;
     const n = parseInt(digitInput, 10);
     if (!Number.isInteger(n) || n < 1 || n > 99) return;
     setDigitInput('');
@@ -525,10 +528,14 @@ const SettingsPage = () => {
                 onChange={(e) => setDigitInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addDigit(); } }}
                 inputProps={{ min: 1, max: 99, inputMode: 'numeric' }}
+                disabled={digitsFull}
                 sx={{ width: 140 }}
               />
-              <Button variant="outlined" onClick={addDigit} sx={{ minHeight: 40 }}>추가</Button>
+              <Button variant="outlined" onClick={addDigit} disabled={digitsFull} sx={{ minHeight: 40 }}>추가</Button>
             </Box>
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
+              최대 {MAX_VOUCHER_DIGITS}개까지 추가할 수 있어요.
+            </Typography>
           </Box>
 
           {/* 단위 버튼 */}
@@ -578,17 +585,22 @@ const SettingsPage = () => {
             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1, fontWeight: 600 }}>
               미리보기 — 결제완료 창
             </Typography>
-            {voucherConfig.digits.length > 0 && (
-              <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mb: 1 }}>
-                {voucherConfig.digits.map((d) => (
-                  <Chip key={d} label={d} variant="outlined" disabled sx={{ borderRadius: `${theme.radii.sm}px` }} />
-                ))}
-              </Box>
-            )}
-            <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
-              {voucherConfig.units.map((u, i) => (
-                <Chip key={i} label={u.label || '?'} variant="outlined" disabled sx={{ borderRadius: `${theme.radii.sm}px` }} />
-              ))}
+            {/* 결제완료 창과 같은 배치 — 숫자 줄 5칸 고정, 단위 줄은 단위 개수로 나눠 넓게. */}
+            <Box sx={{ maxWidth: 360 }}>
+              {voucherConfig.digits.length > 0 && (
+                <Box sx={{ display: 'grid', gridTemplateColumns: `repeat(${MAX_VOUCHER_DIGITS}, 1fr)`, gap: 0.75, mb: 0.75 }}>
+                  {voucherConfig.digits.map((d) => (
+                    <Chip key={d} label={d} variant="outlined" disabled sx={{ borderRadius: `${theme.radii.sm}px` }} />
+                  ))}
+                </Box>
+              )}
+              {voucherConfig.units.length > 0 && (
+                <Box sx={{ display: 'grid', gridTemplateColumns: `repeat(${voucherConfig.units.length}, 1fr)`, gap: 0.75 }}>
+                  {voucherConfig.units.map((u, i) => (
+                    <Chip key={i} label={u.label || '?'} variant="outlined" disabled sx={{ borderRadius: `${theme.radii.sm}px` }} />
+                  ))}
+                </Box>
+              )}
             </Box>
           </Box>
 

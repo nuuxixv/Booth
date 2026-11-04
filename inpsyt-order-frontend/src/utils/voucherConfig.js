@@ -13,6 +13,9 @@ export const DEFAULT_VOUCHER_CONFIG = Object.freeze({
   ],
 });
 
+// 숫자 버튼 최대 개수 — 결제완료 창이 숫자 줄을 5칸 고정 너비로 그린다(2026-11-04 건우님 피드백).
+export const MAX_VOUCHER_DIGITS = 5;
+
 const isPositiveInt = (n) => Number.isInteger(n) && n > 0;
 
 /**
@@ -30,6 +33,7 @@ export function normalizeVoucherConfig(raw) {
   const digits = Array.isArray(src.digits)
     ? [...new Set(src.digits.map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 99))]
       .sort((a, b) => a - b)
+      .slice(0, MAX_VOUCHER_DIGITS)
     : [];
 
   const units = Array.isArray(src.units)
