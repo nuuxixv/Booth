@@ -28,7 +28,7 @@
 - [ ] `token`이 있으면 `supabase.rpc('get_order_by_token', { p_token: token })` 호출 (`fetchOrder`)
 - [ ] RPC 응답은 **토큰 주인 본인 주문 1건만** 반환 → `setOrder(data)`. 형제 주문 상세(child_orders/parent_order)는 응답에 없음(2026-07-13 노출 최소화).
 - [ ] RPC가 데이터 없음(`!data`) 또는 에러(`rpcError`) 시 `setError('주문을 찾을 수 없습니다.')` (catch는 모든 예외를 동일 메시지로 흡수)
-- [ ] `token` 자체가 falsy면 `fetchOrder` 자체를 호출하지 않음 (line 101) — 이 경우 로딩 스피너만 계속 도는 상태가 되므로 **확인 필요** (실제로는 `/order/status/:token` 라우트가 token 없는 경로를 매칭하지 않으므로 도달 어려움)
+- [ ] `token`이 falsy면 `fetchOrder`를 호출하지 않는다(`OrderStatusPage.jsx:123` `if (token) fetchOrder()`). 이때 `loading` 초기값 `true`가 유지돼 스피너가 멈추지 않지만, 라우트가 `/order/status/:token`(`App.jsx:74`)으로 `token` 세그먼트를 필수로 요구해 token 없는 경로 자체가 이 화면에 매칭되지 않으므로 실제로는 도달하지 않는다.
 
 ### 토큰 기반 접근 제어 (RLS·RPC 구조)
 - [ ] `get_order_by_token`은 `SECURITY DEFINER`로 RLS 우회 — anon 사용자도 토큰 한 개만 알면 1행만 조회 가능

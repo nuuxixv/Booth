@@ -1,3 +1,8 @@
+// ⚠️ 경고 — 이 Edge Function은 현재 프론트엔드 어디에서도 호출하지 않는다(미사용).
+//    실제 결제완료 알림톡 발송 경로는 inpsyt-order-frontend/src/api/alimtalk.js 이다(브라우저 직접 fetch).
+//    이 함수는 원샷 응답의 result_code를 검사하지 않고 HTTP 200만으로 alimtalk_sent_at을 기록하므로,
+//    그대로 되살리면 실제로 실패한 발송(result_code != 0)도 성공으로 기록된다.
+//    또한 Deno의 구형 TLS 미지원 제약으로 원샷 API(api2.msgagent.com) 호출 자체가 막힌다(ONESHOT.md 참고).
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.43.0'
 import { corsHeaders } from '../_shared/cors.ts'

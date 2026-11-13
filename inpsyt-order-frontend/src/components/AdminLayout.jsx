@@ -204,8 +204,10 @@ const AdminLayout = () => {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'orders' },
         (payload) => {
-          if (import.meta.env.DEV) console.log('New order received:', payload);
           const row = payload.new || {};
+          // PIN 주문은 status='preparing'로 INSERT되므로 가짜 "새 주문" 알림을 막는다.
+          if (row.status === 'preparing') return;
+          if (import.meta.env.DEV) console.log('New order received:', payload);
           const customerName = row.customer_name || '고객';
           const amount = Number(row.final_payment) || 0;
           const entry = { id: row.id, customerName, amount, at: Date.now() };

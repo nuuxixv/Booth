@@ -470,13 +470,31 @@ const OrderManagementPage = () => {
 
   const handleStatusChange = useCallback(async (orderId, newStatus) => {
     try {
+      // paid 전환은 동시 처리 시 알림톡 중복 발송을 막기 위해 아직 paid가 아닐 때만 갱신한다.
+      if (newStatus === 'paid') {
+        const { data, error } = await supabase
+          .from('orders')
+          .update({ status: newStatus })
+          .eq('id', orderId)
+          .neq('status', 'paid')
+          .select('id');
+        if (error) throw error;
+        if (!data || data.length === 0) {
+          addNotification('다른 화면에서 이미 상태가 바뀌었어요. 목록을 새로고침합니다.', 'warning');
+          fetchOrders();
+          return;
+        }
+        addNotification(`주문 ${orderId}의 상태가 '${statusToKorean[newStatus]}'으로 업데이트되었습니다.`, 'success');
+        fetchOrders();
+        // paid 전환 시 알림톡 자동 발송 (현장 수령 제외)
+        sendPaidAlimtalk(orderId);
+        return;
+      }
+
       const { error } = await supabase.from('orders').update({ status: newStatus }).eq('id', orderId);
       if (error) throw error;
       addNotification(`주문 ${orderId}의 상태가 '${statusToKorean[newStatus]}'으로 업데이트되었습니다.`, 'success');
       fetchOrders();
-
-      // paid 전환 시 알림톡 자동 발송 (현장 수령 제외)
-      if (newStatus === 'paid') sendPaidAlimtalk(orderId);
     } catch (err) {
       addNotification(`주문 상태 업데이트 실패: ${err.message}`, 'error');
     }
