@@ -34,6 +34,8 @@ import EditIcon from '@mui/icons-material/Edit';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 import DaumPostcode from 'react-daum-postcode';
 import { supabase } from '../supabaseClient';
+import { saveOrderItems } from '../api/orders';
+import { buildSaveOrderItemsPayload } from '../utils/orderItemsSave';
 import { sendAlimtalk } from '../api/alimtalk';
 import { SHIPPING_DEFAULTS, calcShippingFee } from '../constants/shipping';
 import { SectionCard, StatusBadge, InfoRow, PriceBlock, EmptyState } from './ui';
@@ -394,55 +396,20 @@ const OrderSections = ({
       const currentEvent = events.find(e => e.id === order.event_id);
       const discountRate = currentEvent?.discount_rate || 0;
 
-      const itemsPayload = editedOrderItems.map(item => {
-        const product = productsMap[item.product_id];
-        // 서버(create-order)를 우회하는 직접 DB write — 이 공식이 정본.
-        // 상품별 오버라이드·is_discountable·반올림 반영(과거 누락 동시 해소).
-        const discountedPrice = getDiscountedUnit(product, discountRate);
-        return {
-          order_id: order.id,
-          product_id: item.product_id,
-          quantity: item.quantity,
-          price_at_purchase: discountedPrice,
-          product_name: product?.name || null,
-          product_code: product?.product_code || null,
-          category: product?.category || null,
-          list_price: product?.list_price || null,
-          on_site_pickup: item.on_site_pickup ?? false,
-        };
+      // p_items 조립(order_id 미포함 — 서버가 p_order_id로 채움). 금액·스냅샷은 pricing.js가 정본.
+      const itemsPayload = buildSaveOrderItemsPayload(editedOrderItems, productsMap, discountRate);
+
+      // 삭제·넣기·금액 UPDATE·준비중 승격을 서버 트랜잭션 한 번으로 처리.
+      // 승격 판정(준비중 + DB 고객명 + 상품 1개+)과 PIN 반납은 서버가 하고 promoted·고객 필드를 돌려준다.
+      const result = await saveOrderItems(order.id, itemsPayload, {
+        total_cost: subtotal,
+        discount_amount: totalDiscount,
+        delivery_fee: shippingFee,
+        final_payment: finalTotal,
       });
+      const promoted = Boolean(result?.promoted);
 
-      const { error: delError } = await supabase.from('order_items').delete().eq('order_id', order.id);
-      if (delError) throw delError;
-      const { error: insError } = await supabase.from('order_items').insert(itemsPayload);
-      if (insError) throw insError;
-
-      // 금액 4필드 UPDATE.
-      const { error: ordError } = await supabase
-        .from('orders')
-        .update({ total_cost: subtotal, discount_amount: totalDiscount, delivery_fee: shippingFee, final_payment: finalTotal })
-        .eq('id', order.id);
-      if (ordError) throw ordError;
-
-      // 준비중(PIN) 주문: 상품 1개+ 이고 (DB에) 고객 정보가 있으면 결제대기로 승격.
-      // 로컬 order.customer_name 이 stale일 수 있어(고객이 상세 창 밖에서 먼저 제출) DB 기준으로 판정 —
-      // .eq('status','preparing')·고객명 존재 조건을 건 UPDATE가 행을 돌려주면 전환된 것.
-      // status_history 는 트리거(trg_status_history)가 채우므로 프론트에서 쓰지 않는다. PIN은 반납(match_code=null).
-      let promoted = false;
-      let promotedCustomer = null;
-      if (order.status === 'preparing' && itemsPayload.filter(it => it.product_id).length >= 1) {
-        const { data: promoteRows, error: promoteErr } = await supabase
-          .from('orders')
-          .update({ status: 'pending', match_code: null })
-          .eq('id', order.id)
-          .eq('status', 'preparing')
-          .not('customer_name', 'is', null)
-          .neq('customer_name', '')
-          .select('id, status, customer_name, phone_number, inpsyt_id, shipping_address, customer_request');
-        if (promoteErr) throw promoteErr;
-        if (promoteRows && promoteRows.length > 0) { promoted = true; promotedCustomer = promoteRows[0]; }
-      }
-
+      // 로컬 상태 — order_id 복원(itemsLocked 판정·현장수령 UPDATE 타깃이 order_id에 의존).
       const localItems = itemsPayload.map(it => ({ ...it, order_id: order.id }));
       setOrder(prev => ({
         ...prev,
@@ -453,13 +420,13 @@ const OrderSections = ({
         delivery_fee: shippingFee,
         final_payment: finalTotal,
         ...(promoted ? {
-          status: 'pending',
-          match_code: null,
-          customer_name: promotedCustomer.customer_name,
-          phone_number: promotedCustomer.phone_number,
-          inpsyt_id: promotedCustomer.inpsyt_id,
-          shipping_address: promotedCustomer.shipping_address,
-          customer_request: promotedCustomer.customer_request,
+          status: result.status || 'pending',
+          match_code: result.match_code ?? null,
+          customer_name: result.customer_name,
+          phone_number: result.phone_number,
+          inpsyt_id: result.inpsyt_id,
+          shipping_address: result.shipping_address,
+          customer_request: result.customer_request,
         } : {}),
       }));
       addNotification('주문 상품이 저장되었습니다.', 'success');
@@ -467,7 +434,12 @@ const OrderSections = ({
       setEditingSection(null);
       onUpdate();
     } catch (error) {
-      addNotification(`주문 상품 저장 실패: ${error.message}`, 'error');
+      // 재계산 결제 금액이 이미 받은 바우처보다 작아진 경우(서버 2차 가드) — 저장 전 검사와 같은 문구.
+      if (error.message === 'VOUCHER_EXCEEDS_PAYMENT') {
+        addNotification(`${voucherConfig.label} 금액보다 결제 금액이 작아져요. 이벤트 적용을 먼저 수정해 주세요.`, 'warning');
+      } else {
+        addNotification(`주문 상품 저장 실패: ${error.message}`, 'error');
+      }
     } finally {
       setSectionSaving(false);
     }
