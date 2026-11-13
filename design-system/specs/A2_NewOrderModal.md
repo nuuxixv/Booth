@@ -3,7 +3,8 @@
 > 이 시트는 어드민 신규 주문 등록 모달의 정보·기능·데이터 구조의 단일 진실 소스다.
 > 시안 부재 화면이므로 실 컴포넌트(`NewOrderModal.jsx`)가 사실상의 기획이다. 시안이 작성되면 이 시트에 모든 항목이 1:1로 반영되어야 한다.
 > 임의 단순화·통합·생략은 건우님의 명시적 승인 후 이 시트를 먼저 갱신한 다음에만 허용된다.
-> 마지막 갱신: 2026-10-19 **PIN 주문 분기 — 실 페이지 구현 완료**(frontend-engineer). "+신규 주문" 버튼이 `NewOrderBranchDialog`(PIN/수기 2택)를 먼저 열고(바로 NewOrderModal 안 열림), PIN 선택 시 `PinOrderCreateDialog`(학회 자동 선택·상품 0개 생성 안내·`createHelperOrder` RPC·PIN 크게+복사→상세 자동 오픈), 수기 선택 시 **현행 NewOrderModal 그대로**(경로 1글자도 안 바꿈). 분기는 NewOrderModal 바깥. 시안 `PinOrderAdminPreview.jsx` 단계 ①②.
+> 마지막 갱신: 2026-11-13 **상품 넣기 실패 시 주문 되돌리기**(frontend-engineer). `handleSave`에서 `orders` INSERT 성공 후 `order_items` INSERT가 실패하면 방금 만든 주문을 `orders` 삭제로 되돌린다(상품 없는 결제대기 주문이 목록에 남지 않게). 되돌리기 삭제마저 실패하면 주문번호를 포함해 "상품이 저장되지 않은 주문이 목록에 남아 있을 수 있으니 확인해주세요" 안내. 주문 생성·그 밖의 흐름은 불변. **이 사이클은 어드민 주문 상품 저장을 `save_order_items` RPC로 묶는 작업과 함께 배포(A2 주문 상세 시트 참조).** 아래 변경 이력 참조.
+> 이전 갱신: 2026-10-19 **PIN 주문 분기 — 실 페이지 구현 완료**(frontend-engineer). "+신규 주문" 버튼이 `NewOrderBranchDialog`(PIN/수기 2택)를 먼저 열고(바로 NewOrderModal 안 열림), PIN 선택 시 `PinOrderCreateDialog`(학회 자동 선택·상품 0개 생성 안내·`createHelperOrder` RPC·PIN 크게+복사→상세 자동 오픈), 수기 선택 시 **현행 NewOrderModal 그대로**(경로 1글자도 안 바꿈). 분기는 NewOrderModal 바깥. 시안 `PinOrderAdminPreview.jsx` 단계 ①②.
 > 이전 갱신: 2026-10-19 **order_items 스냅샷 컬럼 입력**(frontend-engineer). 어드민 신규 주문 insert에 `product_name/product_code/category/list_price` 4개 스냅샷을 `c.product`에서 채움(OrderSections `handleSaveItems` 정본과 동일). 그간 상품명·카테고리가 빈 채로 저장되던 부채 해소(실사고 #308·#311·#312·#314). `price_at_purchase`는 기존 `calcDiscountedPrice` 유지. DB 트리거(NULL일 때만 채움)와 이중 안전망. 검증: eslint 신규 0.
 > 이전 갱신: 2026-10-19 **PIN 주문 분기 확장(사양·시안 단계)**(product-designer). "+신규 주문"에 **[PIN 주문]/[수기 주문] 분기**를 앞단에 추가. PIN 주문 생성 화면(학회 자동 선택·상품 0개 생성·PIN 4자리 크게 표시·복사) 신설. 수기 주문 = 현행 NewOrderModal **전면 보존**. 아래 "## PIN 주문 (현장 도움 주문) 확장" 참조. 시안 `PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`). 근거 `DOCS/PRD_현장도움주문.md` §4. (구현·DB는 별도 — 이번은 사양·시안만.)
 > 이전 갱신: 2026-08-18 **할인 단가 유틸 경유**(frontend-engineer). `calcDiscountedPrice`와 검색 리스트 할인 표시 판정(`isDisc`)을 공용 유틸 `utils/pricing.js`(`getDiscountedUnit`/`getEffectiveRate`)로 교체 — `discount_override` 반영(실효율 = `discount_override ?? (is_discountable ? discountRate : 0)`). override가 NULL/undefined면 순수 no-op. 검증: build·pricing.test 14 passed·lint 신규 0.
@@ -15,8 +16,9 @@
 - 관련 유틸: `inpsyt-order-frontend/src/utils/search.js` 의 `matchesSearch(name, term)` — 상품명 검색
 - 관련 hook: `inpsyt-order-frontend/src/hooks/useNotification.js`
 - 직접 supabase 호출(컴포넌트 내부):
-  - `supabase.from('orders').insert({...}).select().single()` (line 201-216) — 주문 헤더 생성
-  - `supabase.from('order_items').insert(orderItems)` (line 226) — 상품 행 일괄 삽입
+  - `supabase.from('orders').insert({...}).select().single()` — 주문 헤더 생성
+  - `supabase.from('order_items').insert(orderItems)` — 상품 행 일괄 삽입
+  - **(2026-11-13) `supabase.from('orders').delete().eq('id', orderData.id)`** — 상품 넣기 실패 시 주문 되돌리기(보상 삭제)
 - **Edge Function 미사용** — 고객 측 `create-order` Edge Function(`supabase/functions/create-order/index.ts`)을 우회하고 클라이언트에서 직접 두 번의 insert를 수행한다. 가격·할인·배송비 계산은 모두 클라이언트에서 한다.
 - prop으로 받는 사전 로드 데이터:
   - `events` (학회 목록 — sortedEvents로 start_date desc 정렬)
@@ -182,6 +184,7 @@
 - [ ] insert order_items 페이로드:
   - `order_id, product_id, quantity, price_at_purchase: calcDiscountedPrice(product)`
   - 스냅샷 컬럼(`product_name, product_code, category, list_price`)을 `c.product`에서 채움 (2026-10-19 해소, OrderSections 정본과 동일).
+- [ ] **(2026-11-13) order_items INSERT 실패 시 되돌리기**: 방금 만든 주문을 `orders` 삭제로 되돌린 뒤 기존 오류 안내(`주문 추가 실패: {message}`). 되돌리기 삭제마저 실패하면 주문번호 포함 안내(`상품 저장에 실패했고 주문 #{id} 되돌리기도 실패했어요. 상품이 저장되지 않은 주문이 목록에 남아 있을 수 있으니 확인해주세요.`, error). 상품 없는 결제대기 주문이 목록에 잔류하는 사고 방지.
 - [ ] 성공 시: `addNotification('신규 주문이 추가되었습니다.', 'success')` → `onSuccess?.()` (페이지 새로고침 트리거) → `onClose()`
 
 ### 자동 채워지는 필드 (insert에 명시되지 않으나 DB가 채움)
@@ -310,6 +313,7 @@
 - [ ] 시안: `src/components/PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`) — 단계 ①(분기 선택), ②(PIN 주문 생성 + PIN 큰 표시·복사). 토글로 전환.
 
 ## 변경 이력
+- 2026-11-13 상품 넣기 실패 시 주문 되돌리기(frontend-engineer, tech-cto 설계·건우님 승인) — `handleSave`에서 `orders` INSERT 성공 후 `order_items` INSERT가 실패하면 `orders` 삭제로 보상(상품 없는 결제대기 주문 잔류 방지). 되돌리기 삭제 성공 시 기존 catch로 `주문 추가 실패: {message}`, 되돌리기마저 실패 시 주문번호 포함 안내 후 return. 주문 생성·가격 계산·그 밖의 흐름 무변경. 어드민 주문 상품 저장을 `save_order_items` RPC로 묶는 작업(A2 주문 상세)과 **함께 배포**. 검증: 변경 파일 eslint 0, 전체 vitest pass, build OK.
 - 2026-10-19 PIN 주문 분기 — 실 페이지 구현 완료(frontend-engineer) — `OrderManagementPage`의 "+신규 주문" 버튼이 `NewOrderBranchDialog`(신규)를 먼저 연다. PIN 주문 카드 → `PinOrderCreateDialog`(신규, 학회 Select 자동 선택·상품 0개 생성 안내·`createHelperOrder(eventId)` RPC(`api/helperOrderAdmin.js`)·생성 후 `PinDisplay` 큰 PIN+복사·"주문 상세 열기"로 이어짐). 수기 주문 카드 → 기존 `NewOrderModal`(`OPEN_NEW_ORDER`) 그대로 — 내부 무변경(회귀 0). 종료 학회는 RPC "종료된 학회입니다" 예외를 사용자 문구로 매핑. **보완(2026-10-19 2차, 메인 Claude 검수): 학회 기본값 결함 수정** — getEvents가 이름순 정렬이라 `state.events[0]`이 가나다 첫 학회로 잡히던 문제를, `getEvents`에 `end_date, closed_at` 추가 + 순수 함수 `pickDefaultPinEvent`(진행 중 KST 판정)로 교체. PIN 생성 다이얼로그에 상태 뱃지(`pinEventStatusKey`) 복원 + closed_at 학회 선택지 비활성. **부수 효과: NewOrderModal 상태 뱃지가 이제 표시(원 사양 의도).** 검증: lint 신규 0, vitest(pinOrder 20건) 통과, build OK.
 - 2026-10-19 PIN 주문 분기 확장(사양·시안 단계, product-designer) — "+신규 주문" 앞단에 [PIN 주문]/[수기 주문] 분기 신설. PIN 주문 생성 화면(학회 자동 선택·상품 0개 생성·PIN 4자리 크게+복사) 사양 추가. 수기 주문 = 현행 NewOrderModal 전면 보존(내부 무변경). 시안 `PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`) 단계 ①②. 근거 `DOCS/PRD_현장도움주문.md` §4. 실 구현·DB(`match_code`·인덱스·PIN 생성/조회 함수)는 별도 사이클.
 - 2026-05-29 신설 — M3-13 선행. 시안 부재 화면이므로 실 컴포넌트가 단일 진실 소스. 스냅샷 컬럼 미입력 1건, status_history 초기항목 누락 1건, 배송비 기준 3중 분기 1건, customer_request·admin_memo 입력란 부재 2건을 부채 후보로 기록. 시안 작업 착수 시 이 시트의 핵심 발견 6건을 먼저 정리한 뒤 진행.
