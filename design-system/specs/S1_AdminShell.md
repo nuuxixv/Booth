@@ -164,6 +164,7 @@
   4. **소리** — 토글 ON일 때 WebAudio 내장 beep 1회(880Hz sine, 0.35s). 음원 파일·라이브러리 0
 - [ ] payload 필드: `payload.new.customer_name`, `payload.new.final_payment`, `payload.new.id` (orders 테이블)
 - [ ] 구독은 **1회만 생성**(deps `[addNotification, navigate]`), 토글 최신값은 ref(`browserRef`·`soundRef`)로 읽음
+- [ ] **PIN 주문(`status==='preparing'`) 제외** (2026-11-13) — INSERT row의 `status === 'preparing'`이면 콜백 맨 앞에서 `return`해 4종 처리를 전부 건너뛴다. PIN 주문 생성은 `customer_name=null`·`final_payment=0`인 준비중 행을 INSERT하므로, 가드가 없으면 직원이 PIN 주문을 만들 때마다 "고객 · 0원" 가짜 신규주문 알림(토스트·종 뱃지·브라우저 알림·알림음)이 울린다.
 - [ ] **시각 무관 — 토스트 메시지 자체는 건드리지 말 것**
 
 ### 2-J. 신규 주문 알림 설정 (AdminLayout.jsx + AdminHeader.jsx, 2026-06-15 신설)
@@ -363,6 +364,7 @@
 
 ## 변경 이력
 
+- 2026-11-13 **PIN 주문 가짜 신규주문 알림 차단** (frontend) — `realtime-orders` INSERT 콜백 맨 앞에 `row.status === 'preparing'`이면 `return` 가드 추가(§2-I). PIN 주문 생성(`preparing`·`customer_name=null`·`final_payment=0`) 시 울리던 "고객 · 0원" 가짜 신규주문 토스트·종 뱃지·브라우저 알림·알림음을 모두 억제. 일반 신규주문(`pending`) 알림은 불변. 변경 파일: AdminLayout.jsx만.
 - 2026-06-15 **브라우저 알림 "차단됨" 개선** (frontend) — 라이브에서 `Notification.permission==='denied'`로 토글이 안 켜지던 문제. ① AdminLayout에 `notifPermission` state(granted/denied/default/unsupported, `readPermission()`로 산출, 마운트+드롭다운 열 때 재확인) 신설. ② `browserNotifOn = browserNotif && permission==='granted'`로 Switch 표시-권한 동기화(localStorage 'true'여도 권한 없으면 OFF 표시 → 미스매치 차단). ③ 토글 핸들러: granted만 ON+테스트 알림 1회(`'알림이 켜졌어요'`), denied/default거부/unsupported는 OFF 유지 + 드롭다운 내 인라인 안내(토스트 폐기, 룰 E 텍스트만). ④ 소리 토글 ON 시 `playBeep` 1회 추가. ⑤ AdminHeader: "차단됨" Chip(gray) + denied/unsupported 해제 안내 영역(gray[50], caption) + unsupported 시 Switch disabled. Service Worker/Web Push 미도입, 신규 라이브러리 0, theme 토큰만. 변경 파일: AdminLayout.jsx·AdminHeader.jsx만. **lint/build는 환경상 메인 Claude가 실행 검증 필요**(이 세션 Bash 차단).
 - 2026-06-15 **신규 주문 알림 강화** (frontend) — 기존 `realtime-orders` INSERT 콜백(토스트만)을 4종 처리로 확장(§2-I). 헤더 종에 놓친 신규주문 뱃지 + 신규주문 드롭다운 + 알림설정 토글 2종 신설(§1-H). 브라우저 알림(ⓐ, `notif:newOrder:browser`)·소리(WebAudio beep, `notif:newOrder:sound`)·역할별 디폴트(fulfillment* 기본 OFF) 추가(§2-J). 변경 파일: AdminLayout.jsx(state 단일 소스·구독 콜백·토글 핸들러)·AdminHeader.jsx(종 뱃지·드롭다운·토글 UI, props 수신). Service Worker/Web Push 미도입, 신규 라이브러리 0. lint(touched 0 error)·build green.
 - 2026-06-01 **이식 완료** (frontend) — §3 After·§4 제거·§5/§6-R 정본대로 AdminSidebar·AdminHeader 시각 토큰 이식. AdminLayout은 §6-R #6(배경 gray[100] 유지)·maxWidth 1280 유지로 변경 없음(헤더 `mb:3` 제거는 AdminHeader에서 처리, 헤더-콘텐츠 간격은 레이아웃 `py`로 일원화). lint·build green.

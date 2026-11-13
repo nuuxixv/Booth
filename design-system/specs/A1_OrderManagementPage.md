@@ -114,7 +114,7 @@
 ### 행 액션
 - [ ] 신규 주문 버튼 → `NewOrderModal` 오픈 (`orders:edit` 필요)
 - [ ] 행 클릭 → `OrderDetailModal` 오픈
-- [ ] 상태 셀 Select 변경 → `orders.status` 업데이트 + `status_history` 트리거로 이력 추가 + (newStatus=paid면) `sendAlimtalk(orderId)` 비동기 호출 — line 418-436
+- [ ] 상태 변경 → `orders.status` 업데이트 + `status_history` 트리거로 이력 추가 + (newStatus=paid면) `sendPaidAlimtalk(orderId)` 비동기 호출. **paid 전환은 `.neq('status','paid').select('id')` 조건부 갱신**(2026-11-13) — 동시 처리로 이미 paid면 0행 반환 → "다른 화면에서 이미 상태가 바뀌었어요. 목록을 새로고침합니다." 안내 후 `fetchOrders()`만 하고 성공 토스트·알림톡은 생략(알림톡 중복 발송 차단, `handleVoucherConfirm`과 동일 패턴). paid 외 전환은 기존 무조건 update 유지 — `handleStatusChange`(line 471~)
 - [ ] **합배송 자식 행 상태 편집** — (2026-11-04 A13) 자식 행도 상태 배지 버튼 + `StatusChangeModal`(전이 후보만). **합배송 자식은 바우처 비적용** — 결제완료 선택 시 이벤트 적용 모달을 열지 않고 즉시 `handleGroupChildStatusChange`(대표 위임 보존). 이벤트 ON이면 모달 결제완료 아래 안내 "합배송 주문은 {용어}를 적용할 수 없어요. 결제완료만 처리됩니다."(A13 §③). 껍데기 행은 읽기전용 종합 배지 유지. `handleGroupChildStatusChange(node, child, newStatus)`가 `classifyGroupStatusChange`로 분기:
   - `passthrough` → 기존 `handleStatusChange(child.id, newStatus)`(paid 시 알림톡 자동발송 포함)
   - `auto`(대표 취소·환불 && 남은 활성 1건) → `reassignGroupRepresentative` 후 status update → “묶음 배송지를 자동으로 옮기고 주문을 취소했습니다.” 토스트 → 재조회
@@ -124,7 +124,7 @@
 - 엑셀 반출 기능 전면 제거. 웹에서 직접 처리하므로 엑셀 다운로드 버튼·Menu·`handleExcelDownload`·`exportOrderExcel`(`utils/orderExcel.js`)·`orderExcel.test.js`를 모두 삭제. `xlsx` 패키지는 상품관리 등 다른 화면에서 계속 사용하므로 의존성은 유지.
 
 ### 알림톡 발송 트리거 (ONESHOT 정합)
-- [ ] **단일 상태 변경: status `→ paid` 시점**에 `sendAlimtalk(orderId)` 자동 호출 — line 425-432
+- [ ] **단일 상태 변경: status `→ paid` 시점**에 `sendPaidAlimtalk(orderId)` 자동 호출. **단, `.neq('status','paid')` 조건부 갱신이 실제로 상태를 바꾼 경우(1행 반환)에만 발송** — 동시 처리로 이미 paid면 발송하지 않는다(2026-11-13, 중복 발송 차단)
 - [ ] **일괄 상태 변경: `bulkStatus === 'paid'` 일 때만** 순차 발송 — line 301-323
 - [ ] `is_on_site_sale === true` 면 발송 skip (api/alimtalk.js:24)
 - [ ] `phone_number` 없으면 실패 반환
@@ -316,6 +316,7 @@ frontend가 M3 사이클에서 흡수해야 할 항목:
 - [ ] 시안: `src/components/PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`) — 단계 ⑤(주문 목록: 데스크톱 테이블 + 휴대폰 카드, 준비중 뱃지 + PIN, 체크박스 disabled, 상태 전이 취소만, 제외 캡션). 단계 ①(신규 주문 분기 진입)도 이 페이지 "+신규 주문"에서 시작.
 
 ## 변경 이력
+- 2026-11-13 단건 결제완료 중복 알림톡 차단 (frontend-engineer) — `handleStatusChange`의 paid 전환을 `.update({status:'paid'}).eq('id',orderId).neq('status','paid').select('id')` 조건부 갱신으로 바꿔, 두 담당자가 같은 주문을 동시에 결제완료 처리해도 한 명만 성공하게 함. 0행 반환 시 "다른 화면에서 이미 상태가 바뀌었어요. 목록을 새로고침합니다."(warning) + `fetchOrders()`만 하고 성공 토스트·`sendPaidAlimtalk` 생략(`handleVoucherConfirm`과 동일 패턴). paid 외 전환은 기존 무조건 update 유지. **일괄 경로(`handleBulkStatusUpdate`)는 이번 범위 밖 — RPC `bulk_update_order_status` 후 `allowedIds` 전체에 알림톡 순차 발송이라 동일 중복 위험 잔존(후속 과제).** 변경 파일: OrderManagementPage.jsx만.
 - 2026-11-04 이벤트(바우처·배송비 면제) 결제 처리 — 목록 상태 칸(A13 §③, frontend-engineer) — 단독 행·합배송 자식 행의 상태 `<Select>`를 **상태 배지 버튼 + `StatusChangeModal`**(신규)로 교체. 전이 0개·권한 없음은 읽기전용 배지. 합배송 자식은 기존 위임 경로(`handleGroupChildStatusChange`) 즉시 적용(바우처 비적용·이벤트 ON이면 안내 문구). **이벤트 ON 단독 주문 결제완료 → `VoucherPaymentModal`(신규, A13 §④)** 로 상태·바우처·배송비 면제를 한 번의 update로 확정. 일괄 결제완료 전환 시 이벤트 ON 주문 포함되면 "이벤트 적용 학회 주문 N건은 {용어} 없이 결제완료됩니다. 계속할까요?" 확인. paid 알림톡 자동 발송은 `sendPaidAlimtalk`로 공용화. 상세·단일 진실 소스=`A13_VoucherEvent.md`. 검증: voucherPayment.test 9건·StatusChangeModal 3건 추가, 전체 vitest 471 pass·2 skip, lint 신규 0, build OK.
 - 2026-10-19 준비중(PIN 주문) 상태 — 2차 보완(frontend-engineer, 메인 Claude 검수) — **(1) 실시간 핸들러 확장:** 준비중 id 집합에 속한 주문의 UPDATE면 **상태와 무관하게 목록 재조회**(고객이 배송지만 먼저 제출 → "작성 중"이 고객명으로 즉시 갱신). 알림·알림음은 pending 전환일 때만(본인 저장분 중복 억제 유지). **(2) 생성 후 상세 자동 오픈 보완:** 목록 필터로 새 준비중 주문이 목록에 없을 때 `getOrderById(orderId)`(신규, `api/orders.js`) 단건 조회로 상세를 연다(목록 등장 시 열기는 폴백). **(3) PIN 생성 학회 기본값 수정:** getEvents 이름순 정렬로 엉뚱한 학회가 기본값이던 문제를 `pickDefaultPinEvent`(진행 중 KST)로 교체(상세는 A2_NewOrderModal). 검증: lint 신규 0, vitest(pinOrder 20건) 통과, build OK.
 - 2026-10-19 준비중(PIN 주문) 상태 — 실 페이지 구현 완료(frontend-engineer) — `OrderManagementPage.jsx`에 준비중 행 표시(뱃지+`match_code` PIN 칩·고객명 "작성 중" muted·행 체크박스 disabled+Tooltip "준비중 주문은 일괄 변경 대상이 아니에요"·전이 취소만) 반영. "+신규 주문" 버튼이 `NewOrderBranchDialog`(PIN/수기 2택)를 먼저 열고, PIN 선택 시 `PinOrderCreateDialog`로 생성→상세 자동 오픈. 원격 제출 실시간 알림: `orders` UPDATE 구독 + 준비중 id 집합 판정(본인 저장분 중복 억제, 채널 언마운트 정리). 제외(매출·출고·합배송·일괄 변경)는 PR #79 선행분 검증. 상태 필터 드롭다운은 `STATUS_TO_KOREAN`에 preparing 포함되어 자동 노출. 검증: lint 신규 0, vitest 통과(pinOrder.test.js 9건 추가), build OK.

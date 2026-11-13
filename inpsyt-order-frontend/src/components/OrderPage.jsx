@@ -385,7 +385,7 @@ const OrderPage = () => {
       },
       expired: {
         emoji: '📅',
-        title: '주문이 가능한 날짜가 아니예요.',
+        title: '주문이 가능한 날짜가 아니에요.',
         desc: '주문 내역은 받아보신 알림톡에서 확인할 수 있어요.',
       },
       not_found: {

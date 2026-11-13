@@ -464,7 +464,7 @@ Windows 고대비를 켜면 OS가 우리 색을 시스템 팔레트로 강제 �
 - [ ] 접근 차단 화면(`accessError` 있을 때, line 224-256):
   - 3가지 케이스 메시지 매핑:
     - `no_slug`: 링크 이모지 + "링크를 확인해 주세요" — "학회 전용 링크로만 주문할 수 있어요. 담당자에게 올바른 링크를 받아 다시 접속해 주세요."
-    - `expired`: 달력 이모지 + "주문이 가능한 날짜가 아니예요." — "주문 내역은 받아보신 알림톡에서 확인할 수 있어요." (`showLookup: true`로 코드에 표시돼 있으나 실제 lookup 버튼은 미렌더 — **확인 필요**)
+    - `expired`: 달력 이모지 + "주문이 가능한 날짜가 아니에요." — "주문 내역은 받아보신 알림톡에서 확인할 수 있어요." (조회 버튼 없음 — expired 메시지는 이모지·제목·본문만 렌더하며 `showLookup` 속성은 코드에 존재하지 않는다. `OrderPage.jsx` 접근 차단 화면의 세 케이스 모두 `{ emoji, title, desc }`만 가진다.)
     - `not_found`: 물음표 이모지 + "찾을 수 없는 링크예요" — `no_slug`와 동일 안내
   - 화면 구성: 큰 이모지(4rem) + 제목(`h6`, `fontWeight: 800`) + 본문(`body2`, `text.secondary`, whiteSpace pre-line, lineHeight 1.8)
   - 가운데 정렬, height `100dvh`, p 4
