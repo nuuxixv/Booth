@@ -3,7 +3,8 @@
 > 이 시트는 어드민 주문 상세·편집 모달의 정보·기능·데이터 구조의 단일 진실 소스다.
 > 시안 부재 화면이므로 실 컴포넌트(`OrderDetailModal.jsx`)가 사실상의 기획이다. 시안이 작성되면 이 시트에 모든 항목이 1:1로 반영되어야 한다.
 > 임의 단순화·통합·생략은 건우님의 명시적 승인 후 이 시트를 먼저 갱신한 다음에만 허용된다.
-> 마지막 갱신: 2026-10-19 **준비중(PIN 주문) 상세 — 실 페이지 구현 완료**(frontend-engineer). `OrderSections.jsx`: 준비중 상태 행=뱃지+PIN(`match_code`) 칩+취소, "준비 상태"(ReadinessRow) 카드, 주문자/배송지 빈 상태 문구, 결제대기 자동 전환(`handleSaveItems`·`handleSaveCustomer` 두 곳, `shouldPromoteToPending` 판정, `orders` UPDATE에 `status:'pending'` 동봉, `status_history`는 트리거 담당)+"결제 준비 완료" 토스트·알림음(`playBeep`)+상위 중복 억제(`onLocalPromote`). 상품 담기=기존 `ProductPickerDialog` 편집 경로 재사용. 배송지 3필드 분리 유지. 시안 `PinOrderAdminPreview.jsx` 단계 ③④.
+> 마지막 갱신: 2026-11-13 **주문 상품 저장·삭제 단일 트랜잭션화**(frontend-engineer). 상품 저장(`handleSaveItems`)의 `order_items` DELETE→INSERT + `orders` 금액 UPDATE + 준비중 조건부 승격 네 요청을 신규 RPC `save_order_items` **한 번**으로 교체(`api/orders.js` 래퍼 `saveOrderItems`). 승격 판정·PIN 반납·승격 고객 필드 반환은 서버가 담당(`promoted` 플래그). 금액은 pricing.js가 정본 — 서버 재계산 없음. p_items는 order_id 미포함(서버가 p_order_id로 채움), 로컬 상태엔 order_id 복원. 서버 예외 `VOUCHER_EXCEEDS_PAYMENT`는 저장 전 검사와 같은 문구로 안내. 주문 삭제(`handleDeleteConfirm`)는 `order_items` 선삭제 요청을 제거하고 `orders` 삭제 한 번만 실행(FK ON DELETE CASCADE 의존, 운영 DB 확인 2026-11-13). **이 변경은 RPC `save_order_items`가 운영 DB에 적용된 뒤에만 배포 가능.** 아래 변경 이력 참조.
+> 이전 갱신: 2026-10-19 **준비중(PIN 주문) 상세 — 실 페이지 구현 완료**(frontend-engineer). `OrderSections.jsx`: 준비중 상태 행=뱃지+PIN(`match_code`) 칩+취소, "준비 상태"(ReadinessRow) 카드, 주문자/배송지 빈 상태 문구, 결제대기 자동 전환(`handleSaveItems`·`handleSaveCustomer` 두 곳, `shouldPromoteToPending` 판정, `orders` UPDATE에 `status:'pending'` 동봉, `status_history`는 트리거 담당)+"결제 준비 완료" 토스트·알림음(`playBeep`)+상위 중복 억제(`onLocalPromote`). 상품 담기=기존 `ProductPickerDialog` 편집 경로 재사용. 배송지 3필드 분리 유지. 시안 `PinOrderAdminPreview.jsx` 단계 ③④.
 > 이전 갱신: 2026-10-19 **준비중(PIN 주문) 상세 확장(사양·시안 단계)**(product-designer). 준비중 상태의 상세에 PIN 재표시 · "상품 n종 / 고객 정보 ○✕" 준비 상태 줄 · 상품 담기(`ProductPickerDialog` 재사용) · 결제대기 자동 전환 · "결제 준비 완료" 알림(토스트·알림음) · 함께 확인 안내를 추가. 아래 "## 준비중(PIN 주문) 상세 확장" 참조. 시안 `PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`) 단계 ③④. 근거 `DOCS/PRD_현장도움주문.md` §4·§5. (구현·DB는 별도.)
 > 이전 갱신: 2026-10-12 **stale 테스트 2건 정합화 + 편집 진입 서술 정리**. `OrderDetailModal.test.jsx`의 실패 2건(전역 `/편집/i` 버튼 단일 조회 → 섹션별 Edit 아이콘 4개 다중매칭, `update_order_details` RPC 기대)은 78e440f(2026-07-07 섹션별 인라인 편집 재설계, CTO·CPO 검수 통과)부터 이어진 **테스트 쪽 불일치**로 판정(코드 회귀 아님 — 코드 무수정). 테스트를 섹션 제목 기준 편집 버튼 조회 + `orders` 부분 UPDATE 기대로 교체, 회귀 테스트 상품 목에 `is_discountable:true` 보강(412ba7b 할인 공식 정합). 두 테스트 모두 변이 검증(배송비 할인가 기준 회귀·주문자명 UPDATE 누락을 주입하면 실패) 확인. 시트 본문에 남아 있던 전역 "편집/저장 토글"·헤더 아이콘·`handleSaveAll` 서술을 현행으로 정리. 검증: 전체 vitest 329 pass·0 fail·2 skip, lint 0.
 > 이전 갱신: 2026-08-25 **상품 추가 = 고객 프론트 상품 선택 UX 재사용**(frontend-engineer, tech-cto 위임). 편집 모드 "상품 추가" 버튼이 **첫 상품 자동 삽입**을 폐기하고 신규 `ProductPickerDialog`(고객 `ProductSelectionStep` 재사용: 검사군 트리·검색·인기/신규 필터)를 연다. 담기 임시 카트 확정 시 각 항목을 `editedOrderItems`에 `{product_id, quantity}`로 append(이미 있는 상품이면 **수량 합산**, 중복 행 금지). 가격·스냅샷은 기존 파이프라인(useEffect 재계산 + handleSaveItems payload)이 그대로 처리 — 신설 없음. 어드민 자유도 원칙상 `visibleCategories=null`(전 상품 노출). 태그 우선 정렬은 행사 `tags ∪ host_society`(getEvents가 host_society 미포함이라 admin에선 tags만, graceful). 기존 행별 Autocomplete는 담긴 행 교체·수정용으로 유지. `ProductSelectionStep` 내부 무수정. 검증: build·lint 신규 0, 전체 테스트 294 pass·2 fail(기존 편집버튼 다중매칭, 증가 0).
@@ -28,9 +29,9 @@
     - 주문자: `supabase.from('orders').update({ customer_name, phone_number, inpsyt_id }).eq('id', order.id)` (`handleSaveCustomer`)
     - 배송지: `supabase.from('orders').update({ shipping_address, customer_request }).eq('id', order.id)` (`handleSaveShipping`)
     - 메모: `supabase.from('orders').update({ admin_memo }).eq('id', order.id)` (`handleSaveMemo`)
-    - 상품(비연계 단일 주문만): `order_items.delete().eq('order_id', order.id)` → `order_items.insert(bulk)` → `orders.update({ total_cost, discount_amount, delivery_fee, final_payment }).eq('id', order.id)` (`handleSaveItems`)
+    - 상품(비연계 단일 주문만): **(2026-11-13) `saveOrderItems(order.id, items, amounts)` RPC 한 번**(`api/orders.js` → `supabase.rpc('save_order_items', {p_order_id, p_items, p_amounts})`). 서버가 order_items DELETE→INSERT·orders 금액 UPDATE·준비중 조건부 승격을 단일 트랜잭션으로 처리. 이전 4요청(`order_items.delete` → `order_items.insert` → `orders.update(금액)` → 조건부 승격 `orders.update`) 폐지(`handleSaveItems`)
   - `supabase.from('orders').update({ status }).eq('id', order.id)` — 상태만 변경(현행 유지)
-  - `supabase.from('order_items').delete().eq('order_id', order.id)` + `supabase.from('orders').delete().eq('id', order.id)` (line 274-277) — 삭제
+  - **(2026-11-13) `supabase.from('orders').delete().eq('id', order.id)` 한 번** — 삭제. `order_items` 선삭제 요청 제거(FK ON DELETE CASCADE 의존, 운영 DB 확인 2026-11-13)
 - DB 함수: `supabase/migrations/20260415_004_update_order_functions.sql` 의 `update_order_details(order_id_param int, updates_param jsonb, items_param jsonb)` — **이 모달에서는 2026-07-07부터 미사용**(함수 자체는 잔존)
 - 상태 이력 트리거: `supabase/migrations/20260406_add_status_history_to_orders.sql` — `status` 변경 시 `status_history` jsonb에 자동 누적
 - 결제완료 알림 트리거: `supabase/migrations/20250722070342_create_paid_order_trigger.sql` (`notify_order_paid`) — DB 알림만, 알림톡과 무관
@@ -160,7 +161,7 @@
 - [ ] **소프트 가드**: 한 섹션 편집 중이면 다른 섹션 Edit 아이콘 `disabled` + title "편집 중인 섹션을 먼저 저장하거나 취소하세요". 물리적 dim/클릭차단 없음
 - [ ] **저장 후**: 모달 유지 + 해당 섹션 조회상태 복귀(`onClose` 금지) + `onUpdate()` 재조회
 - [ ] **취소**: 해당 섹션 `edited*` state만 `order` 원본값으로 재초기화
-- [ ] 저장 경로: 주문자/배송지/메모 = `orders` 부분 UPDATE, 상품(비연계 단일만) = `order_items` 재작성 + `orders` 금액 4필드 UPDATE. **`update_order_details` RPC 미사용**
+- [ ] 저장 경로: 주문자/배송지/메모 = `orders` 부분 UPDATE, 상품(비연계 단일만) = **(2026-11-13) `save_order_items` RPC 한 번**(삭제·넣기·금액·승격 트랜잭션). **`update_order_details` RPC 미사용**
 - [ ] 할인율은 학회 읽기전용화로 항상 `order.event_id` 기준 재계산(상품 편집 중 `editingSection==='items'`)
 
 ### 상태 변경 (편집 모드 무관 — 항상 즉시 저장)
@@ -188,8 +189,7 @@
 
 ### 삭제
 - [ ] **권한**: `master` 전용. editor·viewer 모두 노출 안 됨
-- [ ] `handleDeleteConfirm` → `order_items` 삭제 → `orders` 삭제 (트랜잭션 보호 없음, 두 쿼리 순차)
-- [ ] **확인 필요** — `order_items` 삭제 성공 후 `orders` 삭제 실패하면 고아 데이터. 트랜잭션 RPC로 묶을지 부채
+- [ ] **(2026-11-13) `handleDeleteConfirm` → `orders` 삭제 한 번.** `order_items`는 FK(`order_items.order_id → orders(id)`) ON DELETE CASCADE로 함께 삭제됨(운영 DB 확인 2026-11-13). 이전의 `order_items` 선삭제 요청 제거 — 고아 데이터·부분 삭제 위험 해소. 안내 문구·흐름 불변
 
 ### 연계 주문 연결
 - [ ] **(2026-11-04 A13) 이벤트 적용 주문 가드**: `voucher_amount > 0` 또는 `shipping_waived`면 "합배송 만들기" 버튼 숨김 + 안내 "이벤트가 적용된 주문은 합배송으로 묶을 수 없어요." `LinkPreviewDialog`도 baseOrder가 이벤트 적용이면 생성 차단, 후보 목록에서 이벤트 적용 주문 제외(후보 select에 `voucher_amount·shipping_waived` 미포함이라 api 보강 전까지 방어 필터로만 동작 — 아래 "핵심 발견" 참조)
@@ -258,7 +258,8 @@
 ### `order_items` (조회·일괄 재삽입)
 - `id, order_id, product_id, quantity, price_at_purchase`
 - 스냅샷: `product_name, product_code, category, list_price`
-- `on_site_pickup` (boolean, DEFAULT false) — 상품별 현장수령(출고 제외) 플래그. 현장수령 체크박스가 `.eq('id', item.id)` 직접 UPDATE. 상품 섹션 저장(`handleSaveItems`)의 재삽입 payload에도 `on_site_pickup` 포함(편집저장 시 유실 방지). `ALL_ITEMS_SELECT`(api/orders.js)에 `id, on_site_pickup` 포함
+- `on_site_pickup` (boolean, DEFAULT false) — 상품별 현장수령(출고 제외) 플래그. 현장수령 체크박스가 `.eq('id', item.id)` 직접 UPDATE. 상품 섹션 저장(`handleSaveItems`)의 `save_order_items` RPC `p_items`에도 `on_site_pickup` 포함(편집저장 시 유실 방지). `ALL_ITEMS_SELECT`(api/orders.js)에 `id, on_site_pickup` 포함
+- **(2026-11-13) `p_items`에는 `order_id`를 넣지 않는다** — 서버가 `p_order_id`로 채운다(RPC 계약). 로컬 미러 상태에는 `order_id`를 복원(`itemsLocked` 판정·현장수령 UPDATE 타깃이 의존). payload 조립은 순수 함수 `utils/orderItemsSave.js`의 `buildSaveOrderItemsPayload`(테스트 포함)
 
 ### `events` (join)
 - `id, name, discount_rate`
@@ -294,7 +295,7 @@
 
 1. **(해소 2026-07-07) `update_order_details` RPC 시그니처 불일치 부채.** 섹션별 인라인 편집 재설계로 `handleSaveAll`+RPC 호출을 폐지하고 섹션별 `orders` 부분 UPDATE로 전환. `inpsyt_id`는 `handleSaveCustomer`가 직접 UPDATE, 금액 4필드(`total_cost·discount_amount·delivery_fee·final_payment`)는 `handleSaveItems`가 직접 UPDATE → 이전에 silent fail하던 필드들이 정상 반영. RPC는 더 이상 이 모달에서 호출되지 않음(마이그레이션 함수 자체는 잔존하나 미사용).
 
-2. **삭제는 트랜잭션 보호 없음.** `order_items` 삭제 → `orders` 삭제 두 쿼리가 별도 호출(line 274-277). 첫 번째만 성공하면 고아 order_items가 남거나, 두 번째만 실패하면 빈 주문이 남는다. `delete_order` RPC로 묶거나 ON DELETE CASCADE를 검토할 부채.
+2. **(해소 2026-11-13) 삭제 트랜잭션 부채.** `handleDeleteConfirm`을 `orders` 삭제 한 번으로 축소. `order_items`는 FK ON DELETE CASCADE로 함께 삭제됨(운영 DB 확인 2026-11-13) — 고아 데이터·부분 삭제 위험 제거. 또한 상품 저장(`handleSaveItems`)의 4요청을 `save_order_items` RPC 트랜잭션 한 번으로 묶어 부분 저장 위험도 해소.
 
 3. **`linkOrders`는 무조건 `delivery_fee = 0`.** `api/orders.js:155` UPDATE에서 합산 금액이 무료배송 임계치 미만이어도 child의 배송비를 0으로 만든다. 반환값(`combinedListPrice`, `freeShipping`)은 계산하지만 실 UPDATE에는 반영 안 됨. 운영 의도가 “일단 묶으면 배송비 안 받는다”라면 의도대로지만, “무료배송 자격 충족 시에만 0”이라면 버그. **건우님 확인 필요**.
 
@@ -333,7 +334,7 @@
 - [ ] 고객은 상품을 수정하지 않는다(상품 칸=담당자, 배송지 칸=고객). 서로 덮어쓰지 않음(PRD §2).
 
 ### 결제대기 자동 전환 + 알림 (구현 완료 — 2026-10-19 2차 보완 반영)
-- [x] **상품(1개 이상) + 고객 정보가 둘 다 채워지는 순간 자동으로 `preparing → pending`(결제대기).** 별도 "확정" 버튼 없음(PRD §7). 담당자가 상품을 저장하는 순간에도 전환(고객이 상품 없이 먼저 제출한 경우). **구현(DB 기준 판정):** 상세 창이 오래되어 로컬 `customer_name`이 stale일 수 있으므로, `handleSaveItems`는 금액 UPDATE 뒤 `.update({status:'pending', match_code:null}).eq('status','preparing').not('customer_name','is',null).neq('customer_name','').select(...)`를 한 번 더 실행해 **돌아온 행으로 전환을 판정**하고 돌아온 고객 필드를 로컬에 합친다. `handleSaveCustomer`는 로컬 입력값이 정본이라 `shouldPromoteToPending`로 판정하고 승격 시 `match_code:null` 동봉. `status_history`는 트리거(trg_status_history) 담당 — 프론트 미기록.
+- [x] **상품(1개 이상) + 고객 정보가 둘 다 채워지는 순간 자동으로 `preparing → pending`(결제대기).** 별도 "확정" 버튼 없음(PRD §7). 담당자가 상품을 저장하는 순간에도 전환(고객이 상품 없이 먼저 제출한 경우). **구현(2026-11-13 RPC 전환):** `handleSaveItems`는 `save_order_items` RPC 한 번으로 저장하며, 상세 창이 오래돼 로컬 `customer_name`이 stale일 수 있으므로 **승격 판정을 서버가 DB 기준(준비중 + 고객명 존재 + 상품 1개+)으로 수행**하고 `promoted`(불리언)와 승격된 주문의 고객 필드(`customer_name/phone_number/inpsyt_id/shipping_address/customer_request`)·`status`·`match_code`(반납=null)를 돌려준다. 프론트는 `result.promoted`로 전환을 판정하고 돌아온 고객 필드를 로컬에 합친다. `handleSaveCustomer`는 로컬 입력값이 정본이라 `shouldPromoteToPending`로 판정하고 승격 시 `match_code:null` 동봉(현행 유지). `status_history`는 트리거(trg_status_history) 담당 — 프론트 미기록.
 - [x] **승격 시 PIN 반납(`match_code=null`)** — 사양 "결제대기 전환 시 PIN 미표시"와 일치(두 경로 모두).
 - [x] 전환 순간 **"결제 준비 완료" 알림(토스트 + 알림음).** 본인 저장 전환 = `OrderSections` 토스트+`playBeep`(+`onLocalPromote`로 목록 중복 억제). 원격 제출 전환 = `OrderManagementPage` 실시간 알림.
 - [x] **상세 창 실시간 갱신:** 준비중 주문을 보여 주는 동안 그 주문 id의 UPDATE를 구독(`order-detail-{id}`)해 고객 필드·상태·PIN만 로컬 병합 → "고객 정보 ○✕"가 즉시 갱신. 편집 중 상품 버퍼·편집 중 섹션 입력은 보호. 채널은 언마운트/준비중 이탈 시 정리.
@@ -343,6 +344,7 @@
 - [ ] 시안: `src/components/PinOrderAdminPreview.jsx`(`/preview/pin-order-admin`) — 단계 ③(준비중 상세: PIN·준비 상태 줄·상품 담기), ④(고객 제출 → 결제대기 전환 + "결제 준비 완료" 토스트·알림음 + 함께 확인·카드 결제).
 
 ## 변경 이력
+- 2026-11-13 주문 상품 저장·삭제 단일 트랜잭션화(frontend-engineer, tech-cto 설계·건우님 승인) — **(1) 상품 저장**: `handleSaveItems`의 `order_items` DELETE→INSERT + `orders` 금액 UPDATE + 준비중 조건부 승격 네 요청을 신규 RPC `save_order_items` 한 번으로 교체. `api/orders.js`에 래퍼 `saveOrderItems(orderId, items, amounts)` 추가(기존 rpc 래퍼 형식·JSDoc, 오류 throw). 서버가 삭제·넣기·금액 갱신·승격을 한 트랜잭션으로 처리하고 `promoted`·승격 고객 필드(`status/match_code/customer_name/phone_number/inpsyt_id/shipping_address/customer_request`)를 반환 → 프론트는 반환값으로 승격 판정·로컬 병합. 금액은 pricing.js가 정본(서버 재계산 없음). `p_items`는 order_id 미포함(서버가 p_order_id로 채움), 로컬 미러엔 order_id 복원. 저장 전 검사(itemsLocked·바우처 금액)·승격 안내·알림음(`playBeep`)·`onLocalPromote`·`onUpdate`·성공 토스트 전부 보존. 서버 예외 `VOUCHER_EXCEEDS_PAYMENT`는 저장 전 바우처 검사와 **같은 문구**(`{용어} 금액보다 결제 금액이 작아져요…`)로 안내, 나머지 예외는 기존 `주문 상품 저장 실패: {message}`. payload 조립은 순수 함수 `utils/orderItemsSave.js`(테스트 5건: order_id 미포함·스냅샷·pricing·on_site_pickup·빈 입력). **(2) 주문 삭제**: `handleDeleteConfirm`을 `orders` 삭제 한 번으로 축소(`order_items` 선삭제 제거, FK ON DELETE CASCADE 의존·운영 DB 확인 2026-11-13·주석 1줄). 안내 문구·흐름 불변. 핵심 발견 #2(삭제 트랜잭션 부채) 해소. **배포 전제: RPC `save_order_items`가 운영 DB에 적용된 뒤에만 배포 가능**(backend-engineer가 `supabase/migrations/`에 작성 중). 검증: 변경 파일 eslint 0, 전체 vitest pass, build OK.
 - 2026-11-04 이벤트(바우처·배송비 면제) 결제 처리 — 주문 상세(A13 §⑤, frontend-engineer) — (1) 상태 Select에서 **이벤트 ON·비합배송·결제대기→결제완료** 선택 시 `VoucherPaymentModal`(신규) 가로채기(취소 시 선택 자연 복원). (2) 결제 정보 금액 영역에 `voucher_amount>0`이면 "{용어} −N원"·"카드 결제 M원", `shipping_waived`면 배송비 "면제" 표시. (3) **"이벤트 적용 수정"** 버튼(이벤트 ON+결제완료+비합배송) → 수정 모드 모달(`.eq('status','paid')`·알림톡 재발송 없음·면제 해제 시 `computeShipping` 복원). (4) 상품 저장·주문 성격 전환 시 `shipping_waived`면 배송비 0 유지, 재계산 `final_payment < voucher_amount`면 저장 차단. (5) 합배송 연계 가드(위 "연계 주문 연결" 참조). 금액·검증·payload는 `utils/voucherPayment.js` 순수 함수(테스트 9건). 단일 진실 소스 `A13_VoucherEvent.md`. 검증: 전체 vitest 471 pass·2 skip, lint 신규 0, build OK.
 - 2026-10-19 "카드 결제 진행" 버튼 제거(건우님 결정, frontend-engineer) — PIN 주문 결제대기 주문에 보이던 "카드 결제 진행" 버튼을 제외. 결제는 기존 상태 Select(결제대기 → 결제완료)로 처리한다. 안내 박스는 유지하되 문구를 "…결제하고, 위 상태를 결제완료로 바꿔 주세요."로 조정. `CreditCardIcon` import 정리. 토스트 문구는 불변. 검증: lint 신규 0, vitest 통과, build OK.
 - 2026-10-19 준비중(PIN 주문) 상세 — 2차 보완(frontend-engineer, 메인 Claude 검수) — **(1) 결제대기 전환 누락 수정(핵심):** 상세 창이 열린 채 고객이 상품 없이 배송지를 먼저 제출하면 로컬 `customer_name`이 null이라 승격이 누락되던 결함을, `handleSaveItems`에서 금액 UPDATE 뒤 **DB 기준 조건부 UPDATE(.eq('status','preparing')·고객명 존재)로 판정**하도록 교체(돌아온 고객 필드 로컬 병합). **(2) PIN 반납:** 두 승격 경로 모두 `match_code:null` 동봉. **(3) 상세 실시간 구독:** 준비중 주문 id의 UPDATE 구독으로 고객 필드·상태·PIN 즉시 반영(편집 중 상품/입력 보호, 채널 id별 고유·정리). **(4) "결제 준비 완료"+"카드 결제 진행" 버튼 복원(룰 D 생략 철회):** status_history에 preparing 이력 있는 pending 주문에만 노출, 기존 `handleStatusSelect('paid')` 재사용. 준비중 안내 박스도 추가. 검증: lint 신규 0, vitest(pinOrder 20건) 통과, build OK.

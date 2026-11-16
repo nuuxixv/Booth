@@ -47,8 +47,7 @@ const OrderDetailModal = ({ order, open, onClose, statusToKorean, productsMap, p
   const handleDeleteConfirm = async () => {
     setDeleting(true);
     try {
-      const { error: itemsError } = await supabase.from('order_items').delete().eq('order_id', order.id);
-      if (itemsError) throw itemsError;
+      // order_items.order_id → orders(id) FK가 ON DELETE CASCADE라 주문만 지우면 상품도 함께 삭제된다(운영 DB 확인 2026-11-13).
       const { error: orderError } = await supabase.from('orders').delete().eq('id', order.id);
       if (orderError) throw orderError;
       addNotification('주문이 삭제되었습니다.', 'success');

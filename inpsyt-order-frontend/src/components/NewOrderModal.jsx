@@ -228,7 +228,16 @@ const NewOrderModal = ({ open, onClose, onSuccess, events = [], products = [], s
         list_price: c.product.list_price || null,
       }));
       const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
-      if (itemsError) throw itemsError;
+      if (itemsError) {
+        // 상품 넣기 실패 — 방금 만든 주문을 되돌려 상품 없는 결제대기 주문이 목록에 남지 않게 한다.
+        // 권한 정책으로 삭제가 거부되면 오류 없이 0행이 돌아오므로, 실제로 지워진 행까지 확인한다.
+        const { data: rolledBack, error: rollbackError } = await supabase.from('orders').delete().eq('id', orderData.id).select('id');
+        if (rollbackError || !rolledBack || rolledBack.length === 0) {
+          addNotification(`상품 저장에 실패했고 주문 #${orderData.id} 되돌리기도 실패했어요. 상품이 저장되지 않은 주문이 목록에 남아 있을 수 있으니 확인해주세요.`, 'error');
+          return;
+        }
+        throw itemsError;
+      }
 
       addNotification('신규 주문이 추가되었습니다.', 'success');
       onSuccess?.();

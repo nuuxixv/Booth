@@ -266,6 +266,34 @@ export const deleteOrderGroup = async (groupParentId) => {
 };
 
 /**
+ * 주문 상품을 한 번의 트랜잭션으로 저장합니다 (삭제·넣기·금액 갱신·준비중 승격).
+ * 서버 RPC(save_order_items)가 order_items DELETE → INSERT, orders 금액 UPDATE,
+ * 준비중(preparing) 조건부 결제대기 승격을 단일 트랜잭션으로 처리합니다.
+ * 승격 조건(준비중 + DB에 고객명 있음 + 상품 1개 이상)은 서버가 판정하고
+ * promoted 와 승격된 주문의 고객 필드를 돌려줍니다.
+ * 금액은 클라이언트(utils/pricing.js)가 정본이며 서버는 다시 계산하지 않습니다.
+ * @param {number} orderId
+ * @param {Array<{product_id:number, quantity:number, price_at_purchase:number,
+ *   product_name:(string|null), product_code:(string|null), category:(string|null),
+ *   list_price:(number|null), on_site_pickup:boolean}>} items
+ *   order_id는 넣지 않습니다(서버가 p_order_id로 채웁니다).
+ * @param {{total_cost:number, discount_amount:number, delivery_fee:number, final_payment:number}} amounts
+ * @returns {Promise<{promoted:boolean, status:string, match_code:(string|null),
+ *   customer_name:(string|null), phone_number:(string|null), inpsyt_id:(string|null),
+ *   shipping_address:(object|null), customer_request:(string|null)}>}
+ * @throws {Error} ORDER_NOT_FOUND / GROUP_PARENT_NOT_EDITABLE / INVALID_PAYLOAD / VOUCHER_EXCEEDS_PAYMENT
+ */
+export const saveOrderItems = async (orderId, items, amounts) => {
+  const { data, error } = await supabase.rpc('save_order_items', {
+    p_order_id: orderId,
+    p_items: items,
+    p_amounts: amounts,
+  });
+  if (error) throw error;
+  return data;
+};
+
+/**
  * 연계 주문 연결 시 parent 후보를 검색합니다.
  * parent_order_id가 없는 주문만 반환 (이미 child인 주문은 parent가 될 수 없음).
  */
