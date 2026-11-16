@@ -184,7 +184,7 @@ const RankingList = ({ items, color }) => {
           const isTop3 = i < 3;
           return (
             <Box
-              key={item.product_id}
+              key={item.saleKey ?? item.product_id}
               sx={{
                 display: 'flex', alignItems: 'center', gap: 1.5,
                 py: 1.25,
@@ -455,14 +455,17 @@ const DashboardPage = () => {
         const qty = item.quantity || 0;
         const price = item.price_at_purchase || 0;
 
-        if (!productSales[item.product_id]) {
-          productSales[item.product_id] = {
-            product_id: item.product_id, name: itemName, category: itemCategory,
+        // product_id가 null인 행(상품 삭제 후 스냅샷만 남은 주문 항목)이 키 'null' 하나로 합쳐져
+        // 서로 다른 상품이 한 줄로 집계되던 오류 방지 — 이 경우 상품명+분류로 구분한다.
+        const saleKey = item.product_id ?? `name:${itemName}|${itemCategory}`;
+        if (!productSales[saleKey]) {
+          productSales[saleKey] = {
+            product_id: item.product_id, saleKey, name: itemName, category: itemCategory,
             totalQuantity: 0, totalAmount: 0,
           };
         }
-        productSales[item.product_id].totalQuantity += qty;
-        productSales[item.product_id].totalAmount += price * qty;
+        productSales[saleKey].totalQuantity += qty;
+        productSales[saleKey].totalAmount += price * qty;
       });
     });
 
